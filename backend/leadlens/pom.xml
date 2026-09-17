@@ -28,7 +28,23 @@
 	</scm>
 	<properties>
 		<java.version>25</java.version>
+		<!-- Spring Boot 4's parent does not manage the Testcontainers BOM, so it is imported
+		     explicitly below. Testcontainers 2.x renamed its modules (postgresql ->
+		     testcontainers-postgresql). See IMPLEMENTATION_PLAN.md R16. -->
+		<testcontainers.version>2.0.5</testcontainers.version>
 	</properties>
+
+	<dependencyManagement>
+		<dependencies>
+			<dependency>
+				<groupId>org.testcontainers</groupId>
+				<artifactId>testcontainers-bom</artifactId>
+				<version>${testcontainers.version}</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+		</dependencies>
+	</dependencyManagement>
 	<dependencies>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
@@ -49,6 +65,21 @@
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-webmvc</artifactId>
+		</dependency>
+		<!-- Boot 4 moved RestClient out of the web starter into its own module. CrmAdapters
+		     call their CRM over HTTP, so RestClient.Builder has to be auto-configured. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-restclient</artifactId>
+		</dependency>
+		<!-- Spring Boot prefers Apache HttpClient 5 for RestClient when it is present, over the
+		     JDK's HttpClient. Wanted here for connection pooling and per-request timeouts, which
+		     matter once an adapter is making several calls per briefing against a CRM that may be
+		     slow. It is also blocking-socket based rather than NIO, so it works on machines where
+		     Selector.open() is blocked by local security software. -->
+		<dependency>
+			<groupId>org.apache.httpcomponents.client5</groupId>
+			<artifactId>httpclient5</artifactId>
 		</dependency>
 
 		<dependency>
@@ -92,6 +123,24 @@
 			<artifactId>spring-boot-starter-webmvc-test</artifactId>
 			<scope>test</scope>
 		</dependency>
+
+		<!-- Phase 0: real Postgres for integration tests. No Flyway/Liquibase by team
+		     decision (IMPLEMENTATION_PLAN.md 0.3, E.7, R20) - schema is Hibernate-managed. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-testcontainers</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>testcontainers-postgresql</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>testcontainers-junit-jupiter</artifactId>
+			<scope>test</scope>
+		</dependency>
 	</dependencies>
 
 	<build>
@@ -99,6 +148,22 @@
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
+			</plugin>
+			<!-- Surefire runs *Test (fast, no I/O). Failsafe runs *IT, which stand up a real
+			     Postgres and a real HTTP server. Both run under `mvnw verify`, which is what CI
+			     invokes - an integration test nothing executes is worse than no test, because it
+			     looks like coverage. -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-failsafe-plugin</artifactId>
+				<executions>
+					<execution>
+						<goals>
+							<goal>integration-test</goal>
+							<goal>verify</goal>
+						</goals>
+					</execution>
+				</executions>
 			</plugin>
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>

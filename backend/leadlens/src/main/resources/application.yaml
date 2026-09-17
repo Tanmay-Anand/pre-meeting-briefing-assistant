@@ -1,3 +1,34 @@
 spring:
   application:
     name: leadlens
+
+  datasource:
+    url: ${LEADLENS_DB_URL:jdbc:postgresql://localhost:5432/leadlens}
+    username: ${LEADLENS_DB_USER:leadlens}
+    password: ${LEADLENS_DB_PASSWORD:leadlens}
+
+  jpa:
+    # Hibernate manages the schema directly. No Flyway/Liquibase: team decision,
+    # IMPLEMENTATION_PLAN.md 0.3 + E.7. Accepted risk is schema drift when two people
+    # edit entities concurrently (R20) - announce entity changes before editing.
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+
+  threads:
+    virtual:
+      enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+logging:
+  level:
+    com.leadlens: INFO
