@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Mock CRM — LeadBrief test page</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 640px;
+        margin: 40px auto;
+        color: #1a1a1a;
+      }
+      h1 {
+        font-size: 20px;
+      }
+      p.hint {
+        color: #666;
+        font-size: 13px;
+      }
+      .lead {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 14px 16px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        margin-bottom: 10px;
+        cursor: pointer;
+        transition: border-color 0.15s, background 0.15s;
+      }
+      .lead:hover {
+        border-color: #aa3bff;
+        background: rgba(170, 59, 255, 0.05);
+      }
+      .lead__name {
+        font-weight: 600;
+      }
+      .lead__company {
+        color: #666;
+        font-size: 13px;
+      }
+      .lead__budget {
+        font-weight: 500;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Leads</h1>
+    <p class="hint">
+      This is NOT a real CRM — it's a static page for testing LeadBrief's CRM
+      detection and lead-click detection. This page must be loaded over
+      <code>http://localhost/…</code> or <code>http://127.0.0.1/…</code>
+      (e.g. via <code>npx serve mock-crm</code> or
+      <code>python -m http.server</code> run from this folder) so the
+      extension's content script matches it. Clicking a lead below should open
+      the LeadBrief side panel.
+    </p>
+
+    <div class="lead" data-lead-id="12345">
+      <div>
+        <div class="lead__name">Rahul Sharma</div>
+        <div class="lead__company">Acme Corporation</div>
+      </div>
+      <div class="lead__budget">₹1.5 Cr</div>
+    </div>
+
+    <div class="lead" data-lead-id="67890">
+      <div>
+        <div class="lead__name">Priya Menon</div>
+        <div class="lead__company">Northwind Realty</div>
+      </div>
+      <div class="lead__budget">₹95 L</div>
+    </div>
+  </body>
+</html>
