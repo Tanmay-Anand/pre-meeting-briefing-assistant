@@ -1,20 +1,30 @@
 import { useEffect, useState } from 'react'
-import './App.css'
-import Header from './components/Header'
+import AppHeader from './components/AppHeader'
+import CustomerHeader from './components/CustomerHeader'
+import AiSummary from './components/AiSummary'
 import CustomerSnapshot from './components/CustomerSnapshot'
 import KeyInsights from './components/KeyInsights'
 import Objections from './components/Objections'
 import PendingActions from './components/PendingActions'
 import TalkingPoints from './components/TalkingPoints'
 import MissingInformation from './components/MissingInformation'
+import Sources from './components/Sources'
+import Divider from './components/Divider'
+import BottomBar from './components/BottomBar'
 import StatusView, { type BriefStatus } from './components/StatusView'
 import { getCurrentLeadReference, subscribeToLeadChanges } from './services/leadContext'
 import { mockLeadBrief } from './mock/leadBrief'
 import type { LeadBriefData } from './types/leadBrief'
-import type { LeadReference } from './types/crm'
+import type { CrmType, LeadReference } from './types/crm'
 
 function isExtensionContext(): boolean {
   return typeof chrome !== 'undefined' && !!chrome.runtime?.id
+}
+
+const CRM_LABELS: Record<CrmType, string> = {
+  leadrat: 'LeadRat',
+  'leadrat-builder': 'LeadRat Builder',
+  unknown: 'CRM',
 }
 
 // While the UI is being built, always show the dummy briefing instead of
@@ -65,27 +75,44 @@ function App() {
     return subscribeToLeadChanges(loadBrief)
   }, [])
 
+  const crmLabel = detectedLead ? CRM_LABELS[detectedLead.crm] : (brief?.crmName ?? 'CRM')
+
   return (
-    <main className="lb-panel">
+    <div className="h-screen w-full flex flex-col bg-white">
+      <AppHeader crmLabel={crmLabel} connected={!!brief} />
+
       {detectedLead && (
-        <div className="lb-debug-banner">
+        <div className="text-[10px] font-mono text-indigo-600 bg-indigo-50 border-b border-indigo-100 px-4 py-1.5 break-all shrink-0">
           Detected lead · {detectedLead.crm} · {detectedLead.leadId}
         </div>
       )}
+
       {brief && status === 'ready' ? (
         <>
-          <Header brief={brief} />
-          <CustomerSnapshot snapshot={brief.snapshot} />
-          <KeyInsights items={brief.keyInsights} />
-          <Objections items={brief.objections} />
-          <PendingActions items={brief.pendingActions} />
-          <TalkingPoints items={brief.talkingPoints} />
-          <MissingInformation items={brief.missingInformation} />
+          <CustomerHeader customer={brief.customer} meeting={brief.meeting} />
+
+          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-1" style={{ scrollbarWidth: 'thin' }}>
+            <AiSummary summary={brief.summary} />
+            <CustomerSnapshot snapshot={brief.snapshot} />
+            <Divider />
+            <KeyInsights items={brief.keyInsights} />
+            <Divider />
+            <Objections items={brief.objections} />
+            <Divider />
+            <PendingActions items={brief.pendingActions} />
+            <Divider />
+            <TalkingPoints items={brief.talkingPoints} />
+            <Divider />
+            <MissingInformation items={brief.missingInformation} />
+            <Sources items={brief.sources} />
+          </div>
+
+          <BottomBar updatedAt={brief.updatedAt} />
         </>
       ) : (
         <StatusView status={status === 'ready' ? 'empty' : status} />
       )}
-    </main>
+    </div>
   )
 }
 

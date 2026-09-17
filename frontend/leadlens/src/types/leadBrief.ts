@@ -1,15 +1,10 @@
+export type Tone = 'danger' | 'accent' | 'warn' | 'neutral'
 export type ObjectionSeverity = 'high' | 'medium' | 'low'
-
-export interface Objection {
-  title: string
-  source: string
-  date: string
-  severity: ObjectionSeverity
-}
 
 export interface CustomerInfo {
   name: string
   company: string
+  stage: string
 }
 
 export interface MeetingInfo {
@@ -25,14 +20,52 @@ export interface SnapshotInfo {
   timeline: string
 }
 
+export interface SummaryChip {
+  label: string
+  tone: Tone
+}
+
+export interface AiSummaryData {
+  text: string
+  /** Substring of `text` to call out in red, e.g. the core objection. */
+  highlight?: string
+  chips: SummaryChip[]
+}
+
+export interface KeyInsight {
+  text: string
+  source: string
+  date: string
+  icon: string
+  tone: Tone
+}
+
+export interface Objection {
+  title: string
+  source: string
+  date: string
+  severity: ObjectionSeverity
+}
+
+export interface SourceRef {
+  field: string
+  source: string
+  date: string
+  icon: string
+}
+
 export interface LeadBriefData {
   leadId: string
+  crmName: string
+  updatedAt: string
   customer: CustomerInfo
   meeting: MeetingInfo
   snapshot: SnapshotInfo
-  keyInsights: string[]
+  summary: AiSummaryData
+  keyInsights: KeyInsight[]
   objections: Objection[]
   pendingActions: string[]
   talkingPoints: string[]
   missingInformation: string[]
+  sources: SourceRef[]
 }
