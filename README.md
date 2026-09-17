@@ -1,145 +1,124 @@
-# LeadLens
+# LeadBrief (AI CRM Copilot)
 
-**AI pre-meeting briefing assistant, delivered as a CRM-agnostic browser sidecar.**
+LeadBrief is an AI-powered pre-meeting briefing assistant for CRM sales agents. Before a customer meeting, agents normally have to manually piece together context scattered across CRM fields, call notes, WhatsApp threads, and pending tasks. LeadBrief's goal is to surface a single, concise briefing — who the customer is, what's happened so far, what's outstanding, what to talk about — inside a Chrome side panel, without the agent leaving their CRM.
 
-An agent opens a lead in their CRM, clicks **✨ Prepare Me**, and understands the customer in
-ten seconds — requirements, objections, commitments, what's missing, and what to ask — with
-every claim traceable to the CRM record it came from.
+This is a 2-day hackathon build. It prioritizes a working, demoable pipeline over completeness — most of the "brief" content is still mock data; what's real so far is the **extension architecture and CRM-detection pipeline**.
 
-The design principle throughout: **the model is never trusted to originate a fact.** Roughly
-40% of the briefing never touches an LLM, and the rest can only select from pre-extracted,
-pre-cited facts. See [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) — it is the single
-source of truth for architecture, phases and decisions.
-
----
-
-## Repository layout
+## Architecture
 
 ```
-backend/leadlens/      Spring Boot 4 API, the briefing engine and the Demo CRM's data API
-frontend/              MV3 browser extension (Vite + React + TypeScript)
-frontend/demo-crm/     The Demo CRM the extension attaches to
-docker-compose.yml     Postgres for local development
+CRM webpage (LeadRat, LeadRat Builder, ...)
+   │
+   ├─ content script — detects which CRM is open, watches for lead clicks
+   │
+   ▼ chrome.runtime.sendMessage
+background service worker — routes messages, watches network traffic,
+                              opens the side panel, stores the current lead
+   │
+   ▼ chrome.storage.session
+React side panel — reads the current lead, renders the briefing UI
 ```
 
-## Prerequisites
+The core design principle: **the extension is not tightly coupled to any one CRM.** Everything CRM-specific lives behind a `CrmAdapter` interface (hostname matching + lead-ID extraction). Detecting a new CRM or a new way of finding a lead ID means adding an adapter file and registering it — the content script, background worker, storage layer, and UI never need to change.
 
-| Tool | Version | Notes |
-|---|---|---|
-| JDK | **25+** | The build targets Java 25. A JDK 21 on `PATH` will not work — set `JAVA_HOME` to a 25/26 JDK. |
-| Node | **22+** | Vite 8 requires Node 20.19+ / 22.12+. |
-| Docker | any recent | Needed for the dev database and for integration tests. |
+There is no real backend integration yet. A Spring Boot skeleton exists (see below) but currently has no endpoints — CRM/lead data is just logged to the console for now, by design (see "Current status").
+
+## Project structure
+
+```
+backend/leadlens/                        Spring Boot skeleton (no endpoints yet)
+  src/main/java/com/leadlens/
+    LeadlensApplication.java             Entry point; excludes datasource/JPA
+                                          autoconfig since no DB is configured
+    config/SecurityConfig.java           Permit-all + CORS, kept ready for when
+                                          real endpoints are added (spring-boot-
+                                          starter-security is on the classpath
+                                          and will lock down any new controller
+                                          by default otherwise)
+
+frontend/leadlens/                       Chrome extension (React + TS + Vite, MV3)
+  public/manifest.json                   Extension manifest
+  mock-crm/index.html                    Standalone test page simulating a CRM
+                                          lead list with [data-lead-id] rows
+  src/
+    types/
+      crm.ts                             CrmType, CrmContext, LeadReference
+      leadBrief.ts                       LeadBriefData and its nested shapes
+    messaging/types.ts                   ExtensionMessage union (content <-> background)
+    content/
+      content.ts                         Content script entry: detects CRM on
+                                          load, listens for lead clicks
+      crm/
+        types.ts                         CrmAdapter interface
+        detector.ts                      Registry: hostname -> adapter
+        leadrat.ts                       Matches any *.leadrat.com tenant subdomain
+        leadratBuilder.ts                Matches crm.builder.leadratd.com exactly
+        generic.ts                       Fallback adapter + shared data-lead-id logic
+    background/background.ts             Service worker: message routing,
+                                          chrome.webRequest lead detection,
+                                          opens the side panel
+    services/leadContext.ts              chrome.storage.session bridge between
+                                          background and the side panel
+    mock/leadBrief.ts                    Hardcoded LeadBriefData for UI preview
+    components/                          Header, CustomerSnapshot, KeyInsights,
+                                          Objections, PendingActions,
+                                          TalkingPoints, MissingInformation,
+                                          StatusView
+    App.tsx                              Side panel root; SHOW_MOCK_DATA toggle
+                                          controls whether the briefing content
+                                          is always the mock data
+```
+
+## What's implemented
+
+**1. CRM detection.** On page load, the content script calls `detectCrm(window.location.href)`, which matches the hostname against the registered adapters:
+- `leadrat.ts` — any `*.leadrat.com` subdomain (tenant-specific, e.g. `turbo.leadrat.com`, `surya.leadrat.com`)
+- `leadratBuilder.ts` — the fixed hostname `crm.builder.leadratd.com`
+- anything else falls back to `generic.ts` (`id: 'unknown'`)
+
+The detected CRM is currently just logged to the console via the background worker (see "Current status").
+
+**2. Lead-click detection — two different strategies, because the two CRMs expose lead identity differently:**
+- **DOM click strategy** (`content.ts` + `CrmAdapter.extractLeadId`): listens for clicks on `[data-lead-id]` elements. This only works against the mock CRM test page right now — neither real CRM exposes a usable DOM attribute.
+- **Network strategy** (`background.ts`, `chrome.webRequest.onBeforeRequest`): for `crm.builder.leadratd.com`, opening a lead's preview fires `GET https://api.crm.builder.leadratd.com/pre-sales/leads/{uuid}` — the UUID is extracted directly from that URL via regex. This is the one CRM where lead detection is confirmed working end-to-end.
+- **LeadRat proper (`*.leadrat.com`) has no working detection yet** — it doesn't expose the ID in the URL, the DOM, or (as far as investigated) a distinct network call. The next avenue to try is walking React's internal fiber tree from the clicked DOM element (frameworks like React attach the component's props, including whatever lead object it was given, as hidden properties on the DOM node) — untested against the real app so far.
+
+**3. Side panel UI.** Whatever lead reference gets detected (by either strategy) is written to `chrome.storage.session` by the background worker, and the side panel (`App.tsx`) reads it via `services/leadContext.ts` and re-renders when it changes. A small "Detected lead · `{crm}` · `{leadId}`" banner always shows the last detected reference, independent of the mock-data toggle — useful for confirming detection is working without needing devtools open.
+
+The actual briefing content (customer snapshot, objections, pending actions, etc.) is currently **always the hardcoded mock data** (`mock/leadBrief.ts`), controlled by the `SHOW_MOCK_DATA` flag at the top of `App.tsx`. This was intentionally decoupled from real detection while the UI was being built — flip it to `false` to make the panel depend on real detection again (it'll then log the detected lead reference to console and still show the mock briefing, since there's no backend to fetch a real one from).
+
+## What's explicitly not implemented yet
+
+- No real backend endpoints. There were dummy `/api/crm/context` and `/api/leads/brief` endpoints at one point; they were removed in favor of just logging to the console, since the backend wasn't ready to do anything real with the data yet.
+- No AI-generated briefing content — the briefing shown is 100% static mock data.
+- No authentication, anywhere.
+- No lead detection for LeadRat proper (`*.leadrat.com`) — only `leadrat-builder` works right now.
+- The `CrmAdapter` interface only supports the DOM-click strategy formally; the network-based strategy for `leadrat-builder` is currently hardcoded in `background.ts` rather than generalized as a per-adapter capability. Worth generalizing once a second network-based CRM shows up.
 
 ## Running it
 
-Everything goes through the `Makefile`.
+**Frontend (extension):**
+```
+cd frontend/leadlens
+npm run dev:extension      # watches and rebuilds into build/
+```
+Then in `chrome://extensions`: enable Developer Mode → "Load unpacked" → select `frontend/leadlens/build`.
 
-```bash
-make install
+**Backend (currently just a skeleton, nothing calls it):**
+```
+cd backend/leadlens
+./mvnw spring-boot:run
 ```
 
-```bash
-make up
+**Mock CRM test page** (for exercising the DOM click-detection path without needing real CRM access):
 ```
-
-`make up` starts Postgres, builds the backend jar and runs it on `http://localhost:8080`.
-The schema is created by Hibernate on startup — there is no migration tool, by deliberate
-decision (see plan §0.3 and R20).
-
-Then, in separate terminals:
-
-```bash
-make dev-demo-crm
+npx serve frontend/leadlens/mock-crm
 ```
+Must be served over `http://localhost/…` or `http://127.0.0.1/…` — the content script's match patterns don't cover arbitrary `file://` URLs.
 
-```bash
-make dev-extension
-```
+## Gotchas worth knowing before touching this again
 
-The Demo CRM serves on `http://localhost:5174`. That port is referenced by the extension
-manifest and by `DemoCrmAdapter`; changing it means changing both.
-
-To load the extension: `make build-extension`, then `chrome://extensions` → *Developer mode*
-→ *Load unpacked* → select `frontend/dist/`.
-
-### Useful targets
-
-| Target | What it does |
-|---|---|
-| `make status` | What is running, and whether it actually answers |
-| `make health` | Backend health endpoint |
-| `make tail-backend N=200` | Last N lines of the backend log |
-| `make demo-rahul` | Dump the main demo lead straight from the Demo CRM API |
-| `make infra-reset` | Drop the database volume; the Demo CRM re-seeds on next boot |
-| `make down` | Stop everything |
-
-**JDK note.** The build targets Java 25, and the `Makefile` pins `JAVA_HOME` to
-`C:/Program Files/Java/jdk-26`. Override it if yours lives elsewhere:
-`make build JAVA_HOME=/path/to/jdk`.
-
-**No Docker?** The datasource is env-driven, so you can point the backend at any Postgres:
-
-```bash
-make start-backend LEADLENS_DB_URL=jdbc:postgresql://localhost:5432/leadlens LEADLENS_DB_USER=postgres LEADLENS_DB_PASSWORD=secret
-```
-
-## Tests
-
-```bash
-make verify
-```
-
-Unit tests (`*Test`) run under surefire; integration tests (`*IT`) run under failsafe during
-`verify`. Integration tests use a real Postgres started by Testcontainers, because the schema
-is Hibernate-generated and an in-memory database would validate against the wrong dialect.
-
-**Two conditions make integration tests skip rather than fail**, so a developer is never
-blocked by their machine:
-
-| Condition | Effect |
-|---|---|
-| No Docker daemon | Everything needing a database skips |
-| `Selector.open()` fails | Everything needing an embedded web server skips |
-
-CI does not get that option. It sets `LEADLENS_REQUIRE_DOCKER=true`, which turns both skips
-into build failures (`DockerRequiredInCiTest`). **A green local build that skipped everything
-is not a passing build** — check the skip count before trusting it.
-
-### Known issue: `Unable to establish loopback connection`
-
-On some Windows machines `Selector.open()` fails with this error. Plain loopback sockets
-still work, so it looks like networking is fine — but Tomcat's connector and the JDK's
-`HttpClient` both need a selector, so **the app cannot start and Docker Desktop often won't
-either**. It is usually local security software breaking the authenticated loopback socket
-pair that selector creation performs.
-
-Reproduce it in isolation:
-
-```bash
-java -e 'try (var s = java.nio.channels.Selector.open()) { System.out.println("OK"); }'
-```
-
-Worth trying, in order: restart Docker Desktop, `netsh winsock reset` from an admin prompt
-followed by a reboot, then check antivirus/EDR loopback filtering. Until it is fixed, the
-backend cannot be run locally on that machine; the unit suite and CI still cover the code.
-
-## Configuration and secrets
-
-Never committed. `.gitignore` excludes `.env*`.
-
-- **Per-CRM config** lives in one file per adapter: `backend/leadlens/.env.demo`,
-  `.env.leadrat`, and so on, namespaced under `leadlens.crm.<crmKey>.*`. An adapter reads
-  only its own prefix. Adding a CRM is one adapter class plus one env file — no shared
-  config to edit. See plan §G.7.
-- **The LLM key** (`OPENROUTER_API_KEY`) is a single cross-cutting secret, supplied as an
-  environment variable. It is backend-only and must never reach `frontend/` — an extension
-  bundle is public.
-
-## Where to start reading
-
-| If you want | Read |
-|---|---|
-| Why the architecture is shaped this way | Plan Parts B, D, F |
-| What to build next | Plan Part K (phases), K.2 (checklist coverage) |
-| The data model | Plan Part E |
-| How a new CRM gets added | Plan Part G |
+- **MV3 service worker vs. content script bundling**: `background.ts` is declared as an ES module (`"type": "module"` in the manifest) so it can share code (e.g. `services/leadContext.ts`) with the React app via a bundled chunk. `content.ts` cannot do this — content scripts are always classic scripts, so anything it imports (the `content/crm/*` adapters) gets fully inlined into `content.js` by the bundler instead.
+- **`chrome.storage.session` is cleared every time the extension is reloaded** in `chrome://extensions`. When testing lead detection, reload the extension *before* clicking a lead, not after — otherwise you'll be looking at stale/empty storage.
+- **Chrome's per-site "site access" permission toggle can silently block `chrome.webRequest`**, even when `host_permissions` in the manifest correctly lists the domain. This cost significant debugging time: the extension's site-access list (visible via the puzzle-piece icon → extension → "This can read and change site data") had every listed site toggled off despite the manifest being correct. `host_permissions` is currently set to `["<all_urls>"]` as a result — broader than strictly necessary, kept that way because narrowing it back down wasn't reliably reproducible during testing. Worth revisiting if this becomes more than a hackathon project.
+- **MV3 service workers terminate after ~30s idle** and their devtools console history doesn't survive that. If you're debugging background script behavior, don't trust "no console output" — persist anything important to `chrome.storage.session` instead of relying on `console.log` alone.

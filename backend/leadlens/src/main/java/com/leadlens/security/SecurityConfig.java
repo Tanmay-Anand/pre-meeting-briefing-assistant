@@ -1,5 +1,7 @@
 package com.leadlens.security;
 
+import java.util.List;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
@@ -7,6 +9,9 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 /**
  * Web security.
@@ -19,6 +24,10 @@ import org.springframework.security.web.SecurityFilterChain;
  * <p>The Demo CRM's own API already enforces its tenant and role rules independently (see
  * {@code DemoCrmController}), so the permission story being demonstrated is real even while
  * this filter chain is not.
+ *
+ * <p>CORS is permissive for the same reason: the extension calls this API cross-origin from a
+ * {@code chrome-extension://} page, and there is no cookie-based session to scope an origin
+ * allowlist against yet. Tightened alongside real auth in Phase 8.
  */
 @Configuration
 @EnableWebSecurity
@@ -32,11 +41,23 @@ public class SecurityConfig {
 				+ "This is the Phase 1 state; Phase 8 replaces it with token auth and tenant scoping.");
 
 		http
+				.cors(cors -> cors.configurationSource(corsConfigurationSource()))
 				// The extension is not a browser form client; there is no session cookie to
 				// protect, and every mutating call carries an explicit identity header.
 				.csrf(csrf -> csrf.disable())
 				.authorizeHttpRequests(auth -> auth.anyRequest().permitAll());
 
 		return http.build();
+	}
+
+	private CorsConfigurationSource corsConfigurationSource() {
+		CorsConfiguration configuration = new CorsConfiguration();
+		configuration.setAllowedOriginPatterns(List.of("*"));
+		configuration.setAllowedMethods(List.of("GET", "POST", "OPTIONS"));
+		configuration.setAllowedHeaders(List.of("*"));
+
+		UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+		source.registerCorsConfiguration("/**", configuration);
+		return source;
 	}
 }
