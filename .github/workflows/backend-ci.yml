@@ -1,0 +1,68 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-ci.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-ci.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: backend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: backend/leadlens
+
+jobs:
+  build:
+    name: Build & test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 25
+          cache: maven
+
+      - name: Make mvnw executable
+        run: chmod +x ./mvnw
+
+      - name: Build and run tests
+        run: ./mvnw -B --no-transfer-progress verify
+        env:
+          # Integration tests skip themselves when no Docker daemon is reachable, so a
+          # laptop without Docker is not blocked. CI must never take that path: this flag
+          # turns the skip into a hard failure. See DockerRequiredInCiTest.
+          LEADLENS_REQUIRE_DOCKER: "true"
+
+      - name: Upload jar
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: leadlens-jar
+          path: backend/leadlens/target/*.jar
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload test reports
+        uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: backend-test-reports
+          path: backend/leadlens/target/surefire-reports/
+          retention-days: 7
+          if-no-files-found: ignore
