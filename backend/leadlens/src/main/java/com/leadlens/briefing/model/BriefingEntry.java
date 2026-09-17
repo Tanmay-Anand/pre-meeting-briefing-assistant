@@ -2,6 +2,7 @@ package com.leadlens.briefing.model;
 
 import java.util.List;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.leadlens.facts.Provenance;
 
 /**
@@ -39,6 +40,20 @@ public record BriefingEntry(
 		return new BriefingEntry(label, text, provenance, flag, List.of());
 	}
 
+	/**
+	 * Derived, never stored.
+	 *
+	 * <p>{@code @JsonIgnore} is load-bearing, not tidiness. This record is persisted as JSON in
+	 * {@code briefing_sections.entries}, and Jackson treats an {@code isX()} method as a
+	 * property: without this it would be written out as {@code "cited"}, and reading it back
+	 * would fail on the canonical constructor, which has no such component. Hibernate
+	 * round-trips the JSON on every save, so the failure lands at write time with a message
+	 * about deserialization - a confusing place to start debugging.
+	 *
+	 * <p>Any future derived accessor on a persisted record needs the same treatment.
+	 * {@code PersistedJsonRoundTripTest} exists to catch it if one does not get it.
+	 */
+	@JsonIgnore
 	public boolean isCited() {
 		return !sources.isEmpty();
 	}

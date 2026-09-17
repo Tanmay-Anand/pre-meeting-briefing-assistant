@@ -27,7 +27,7 @@ knows where the plan ends and the code begins.
 | **1 — Evidence model, Demo CRM, fixtures** | Done | Full Spring context boots against a real Postgres; entities map, schema generates, seeder runs |
 | **2 — Deterministic projector** | Done | 43 unit tests green; 6 end-to-end briefing tests written (see the environment note below) |
 
-**Test counts at the end of Phase 2:** 43 passing unit tests, 6 integration tests that run in
+**Test counts at the end of Phase 2:** 48 passing unit tests, 6 integration tests that run in
 CI. `DeterministicBriefingIT` covers the Phase 2 exit criteria: a full briefing for the Rahul
 Sharma fixture with working deep links, the four kinds of empty told apart, the masked-field
 case, and the empty lead degrading honestly.
@@ -58,6 +58,31 @@ case, and the empty lead degrading honestly.
 - **Testcontainers 2.x** — module names changed (`postgresql` → `testcontainers-postgresql`)
   and `PostgreSQLContainer` moved package and lost its type parameter. Boot 4's parent does
   not manage the Testcontainers BOM, so it is imported explicitly.
+
+## Gotcha: derived accessors on records stored as JSON
+
+`[ADDED 2026-09-17 — found by CI]` A record persisted into a `jsonb` column must not expose a
+derived `isX()` / `getX()` accessor without `@JsonIgnore`.
+
+`BriefingEntry` had `isCited()`. Jackson treats that as a property, wrote `"cited"` into the
+stored JSON, and the record's canonical constructor — which has no such component — then
+refused to read it back. Hibernate round-trips JSON-mapped values on every save, so the
+failure landed at **write** time with a message about **deserialization**, from inside a
+Spring proxy chain. Nothing about the stack trace pointed at the accessor.
+
+Two things make this worth writing down:
+
+- It only failed in an integration test, so it was invisible on a machine without Docker and
+  a working web server. CI caught it. This is the argument for the CI guard earning its keep.
+- The obvious regression test does **not** catch it. Jackson 3 tolerates unknown properties by
+  default; Hibernate's `Jackson3JsonFormatMapper` does not. A round-trip test using a plain
+  `ObjectMapper` passes while production breaks. `PersistedJsonRoundTripTest` enables
+  `FAIL_ON_UNKNOWN_PROPERTIES` to match Hibernate, and was verified by removing the fix and
+  watching 4 of its 5 assertions fail.
+
+**Applies directly to Phase 3 and 4.** `AtomicFact` is a plain entity today, but any new record
+that lands in a JSON column — extractor output, composer output, run `steps[]` — needs an entry
+in `PersistedJsonRoundTripTest`.
 
 ## Environment note — this will bite someone
 
