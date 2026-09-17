@@ -1,9 +1,9 @@
 package com.leadlens;
 
+import com.leadlens.support.IntegrationTest;
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.test.context.SpringBootTest;
 
-@SpringBootTest
+@IntegrationTest
 class LeadlensApplicationTests {
 
 	@Test
