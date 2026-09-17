@@ -1,5 +1,6 @@
-# Builds the MV3 extension at frontend/ (and type-checks the Demo CRM workspace).
-# Enabled in Phase 0 once the Vite app was scaffolded.
+# Builds the MV3 extension at frontend/leadlens/.
+# Enabled in Phase 0 once the Vite app was scaffolded; moved to frontend/leadlens/ and the
+# Demo CRM workspace removed in the leadbrief-extension rewrite.
 
 name: Frontend CI
 
@@ -22,7 +23,7 @@ concurrency:
 
 defaults:
   run:
-    working-directory: frontend
+    working-directory: frontend/leadlens
 
 jobs:
   build:
@@ -40,7 +41,7 @@ jobs:
           # Vite 8 requires Node 20.19+ / 22.12+; 22 keeps headroom.
           node-version: 22
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: frontend/leadlens/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -57,15 +58,10 @@ jobs:
       - name: Build
         run: npm run build
 
-      # The Demo CRM is a sibling workspace, not part of the extension build. Building it
-      # here stops it rotting unnoticed - it is the extension's only integration target.
-      - name: Build Demo CRM
-        run: npm run demo-crm:build
-
       - name: Upload build output
         uses: actions/upload-artifact@v4
         with:
-          name: frontend-dist
-          path: frontend/dist/
+          name: leadlens-extension
+          path: frontend/leadlens/build/
           retention-days: 7
           if-no-files-found: error
