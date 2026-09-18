@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
-  "name": "AI CRM Copilot",
+  "name": "LeadBrief",
   "version": "1.0.0",
   "description": "AI-powered CRM pre-meeting briefing assistant",
 
   "action": {
-    "default_title": "Open AI CRM Copilot"
+    "default_title": "Open LeadBrief"
   },
 
   "permissions": [
