@@ -1,7 +1,7 @@
 # --- Secrets / local config ---
-# One env file per CRM adapter (IMPLEMENTATION_PLAN.md G.7): .env.demo, .env.leadrat, ...
-# The real files never get committed; the .example templates beside them always do, so a new
-# teammate can see which keys an adapter needs without anyone leaking a value.
+# leadlens/.env carries VITE_AI_SDK_ADMIN_PASSWORD - never committed. The .env.example
+# template beside it always is, so a new teammate can see which keys are needed without anyone
+# leaking a value.
 .env
 .env.*
 !.env.example
@@ -22,10 +22,6 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# --- Java / backend ---
-target/
-*.class
-
 # --- IDE ---
 .idea/
 *.iml
@@ -36,8 +32,4 @@ target/
 # --- OS ---
 .DS_Store
 Thumbs.db
-
-# --- Logs / local runtime state ---
 *.log
-# Written by scripts/service-start.sh; recreated on demand, never shared.
-logs/
