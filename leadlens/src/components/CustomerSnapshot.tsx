@@ -7,9 +7,6 @@ interface CustomerSnapshotProps {
 
 const FIELDS: Array<{ key: keyof SnapshotInfo; label: string; accent?: boolean }> = [
   { key: 'status', label: 'Status', accent: true },
-  { key: 'requirement', label: 'Requirement' },
-  { key: 'budget', label: 'Budget' },
-  { key: 'preferredLocation', label: 'Location' },
   { key: 'timeline', label: 'Timeline' },
 ]
 

@@ -13,9 +13,6 @@ export interface MeetingInfo {
 
 export interface SnapshotInfo {
   status: string
-  requirement: string
-  budget: string
-  preferredLocation: string
   timeline: string
 }
 
@@ -26,8 +23,6 @@ export interface SummaryChip {
 
 export interface AiSummaryData {
   text: string
-  /** Substring of `text` to call out in red, e.g. the core objection. */
-  highlight?: string
   chips: SummaryChip[]
   /** Citation for `text`: which records were queried and which model answered - there is no
    *  finer-grained provenance than this any more (no per-claim source, no CRM-fact/AI-reading

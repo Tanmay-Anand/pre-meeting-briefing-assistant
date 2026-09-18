@@ -69,11 +69,6 @@ export function mapAiSdkResponseToLeadBrief(
     },
     snapshot: {
       status: stage,
-      // Not modeled on this CRM's Lead record (see LeadsCrmAdapter's own note in the previous
-      // architecture) - left absent rather than guessed from a field that isn't the same thing.
-      requirement: '',
-      budget: '',
-      preferredLocation: '',
       timeline,
     },
     summary: {
