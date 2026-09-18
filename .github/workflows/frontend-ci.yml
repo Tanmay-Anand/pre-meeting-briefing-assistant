@@ -1,6 +1,5 @@
-# Builds the MV3 extension at frontend/leadlens/.
-# Enabled in Phase 0 once the Vite app was scaffolded; moved to frontend/leadlens/ and the
-# Demo CRM workspace removed in the leadbrief-extension rewrite.
+# Builds the MV3 extension at leadlens/ - the only project in this repo since the backend was
+# removed in favor of the extension calling leads-crm-backend's ai-query-sdk directly.
 
 name: Frontend CI
 
@@ -8,12 +7,12 @@ on:
   push:
     branches: [main, develop]
     paths:
-      - 'frontend/**'
+      - 'leadlens/**'
       - '.github/workflows/frontend-ci.yml'
   pull_request:
     branches: [main, develop]
     paths:
-      - 'frontend/**'
+      - 'leadlens/**'
       - '.github/workflows/frontend-ci.yml'
   workflow_dispatch:
 
@@ -23,7 +22,7 @@ concurrency:
 
 defaults:
   run:
-    working-directory: frontend/leadlens
+    working-directory: leadlens
 
 jobs:
   build:
@@ -41,7 +40,7 @@ jobs:
           # Vite 8 requires Node 20.19+ / 22.12+; 22 keeps headroom.
           node-version: 22
           cache: npm
-          cache-dependency-path: frontend/leadlens/package-lock.json
+          cache-dependency-path: leadlens/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -62,6 +61,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: leadlens-extension
-          path: frontend/leadlens/build/
+          path: leadlens/build/
           retention-days: 7
           if-no-files-found: error
