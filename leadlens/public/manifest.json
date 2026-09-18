@@ -29,12 +29,7 @@
 
   "content_scripts": [
     {
-      "matches": [
-        "https://*.leadrat.com/*",
-        "https://crm.builder.leadratd.com/*",
-        "http://localhost/*",
-        "http://127.0.0.1/*"
-      ],
+      "matches": ["<all_urls>"],
       "js": ["content.js"],
       "run_at": "document_idle"
     }

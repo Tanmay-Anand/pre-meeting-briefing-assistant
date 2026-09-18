@@ -121,7 +121,11 @@ function App() {
           <BottomBar updatedAt={brief.updatedAt} onRefresh={() => loadBrief(detectedLead)} />
         </>
       ) : (
-        <StatusView status={status === 'ready' ? 'empty' : status} errorMessage={errorMessage} />
+        <StatusView
+          status={status === 'ready' ? 'empty' : status}
+          errorMessage={errorMessage}
+          onRetry={detectedLead ? () => loadBrief(detectedLead) : undefined}
+        />
       )}
     </div>
   )
