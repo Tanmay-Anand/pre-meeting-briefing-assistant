@@ -5,12 +5,12 @@ interface BottomBarProps {
 
 export default function BottomBar({ updatedAt, onRefresh }: BottomBarProps) {
   return (
-    <div className="border-t border-slate-100 bg-white px-4 py-3 flex items-center justify-between shrink-0">
+    <div className="border-t border-line bg-white px-4 py-3 flex items-center justify-between shrink-0">
       <button
         type="button"
         onClick={onRefresh}
         disabled={!onRefresh}
-        className="flex items-center gap-1.5 text-[12px] font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg px-3 py-1.5 transition-colors disabled:opacity-40"
+        className="flex items-center gap-1.5 text-[12px] font-semibold text-brand bg-white hover:bg-surface border border-line rounded-lg px-3 py-1.5 transition-colors disabled:opacity-40"
       >
         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
           <path

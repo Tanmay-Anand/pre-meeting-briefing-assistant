@@ -16,9 +16,9 @@ export default function SectionHeader({ title, count, collapsible, open, onToggl
       disabled={!collapsible}
     >
       <div className="flex items-center gap-2">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{title}</span>
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted">{title}</span>
         {count !== undefined && (
-          <span className="text-[10px] font-semibold text-slate-400 bg-slate-100 rounded-full px-1.5 py-0.5 leading-none">
+          <span className="text-[10px] font-semibold text-muted bg-slate-100 rounded-full px-1.5 py-0.5 leading-none">
             {count}
           </span>
         )}

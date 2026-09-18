@@ -98,11 +98,11 @@ function App() {
   const crmLabel = detectedLead ? CRM_LABELS[detectedLead.crm] : (brief?.crmName ?? 'CRM')
 
   return (
-    <div className="h-screen w-full flex flex-col bg-white">
+    <div className="h-screen w-full flex flex-col bg-surface">
       <AppHeader crmLabel={crmLabel} connected={!!brief} />
 
       {detectedLead && (
-        <div className="text-[10px] font-mono text-indigo-600 bg-indigo-50 border-b border-indigo-100 px-4 py-1.5 break-all shrink-0">
+        <div className="text-[10px] font-mono text-muted bg-surface border-b border-line px-4 py-1.5 break-all shrink-0">
           Detected lead · {detectedLead.crm} · {detectedLead.leadId}
           {detectedLead.projectName && <> · project {detectedLead.projectName}</>}
         </div>
