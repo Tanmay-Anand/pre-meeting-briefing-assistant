@@ -32,6 +32,7 @@
       "matches": [
         "https://*.leadrat.com/*",
         "https://crm.builder.leadratd.com/*",
+        "https://leads-crm-frontend-nine.vercel.app/*",
         "http://localhost/*",
         "http://127.0.0.1/*"
       ],
