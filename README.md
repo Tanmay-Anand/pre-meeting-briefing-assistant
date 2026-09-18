@@ -21,7 +21,7 @@ React side panel — reads the current lead, renders the briefing UI
 
 The core design principle: **the extension is not tightly coupled to any one CRM.** Everything CRM-specific lives behind a `CrmAdapter` interface (hostname matching + lead-ID extraction). Detecting a new CRM or a new way of finding a lead ID means adding an adapter file and registering it — the content script, background worker, storage layer, and UI never need to change.
 
-**The extension and the backend are not wired together yet.** The backend (`backend/leadlens/`) is not a skeleton - it implements the full extraction → grounding → composition pipeline described in `IMPLEMENTATION_PLAN.md` (Phases 0-9) against the `CrmAdapter` interface - but the extension currently never calls it; CRM/lead data detected client-side is just logged to the console, and the panel always renders mock data (see "What's explicitly not implemented yet"). Connecting the two is the largest remaining piece of work.
+**The extension and the backend are wired together.** The backend (`backend/leadlens/`) implements the full extraction → grounding → composition pipeline described in `IMPLEMENTATION_PLAN.md` (Phases 0-9) against the `CrmAdapter` interface, and the extension calls it: `background.ts` does the `POST /api/briefings` → poll → `GET /api/briefings/{id}` round trip and the panel renders the real 12-section document (`SHOW_MOCK_DATA = false` in `App.tsx`). `crm/leadscrm/LeadsCrmAdapter` is the adapter for this project's actual demo CRM, `leads-crm-backend`/`leads-crm-frontend` - see "What's implemented" below.
 
 ## Project structure
 
@@ -76,44 +76,51 @@ frontend/leadlens/                       Chrome extension (React + TS + Vite, MV
 ## What's implemented
 
 **1. CRM detection.** On page load, the content script calls `detectCrm(window.location.href)`, which matches the hostname against the registered adapters:
+- `leadscrm.ts` — this project's actual demo CRM, `leads-crm-frontend`'s Vite dev server (`localhost`/`127.0.0.1` on ports 5173-5175)
 - `leadrat.ts` — any `*.leadrat.com` subdomain (tenant-specific, e.g. `turbo.leadrat.com`, `surya.leadrat.com`)
 - `leadratBuilder.ts` — the fixed hostname `crm.builder.leadratd.com`
 - anything else falls back to `generic.ts` (`id: 'unknown'`)
 
-The detected CRM is currently just logged to the console via the background worker (see "Current status").
-
-**2. Lead-click detection — two different strategies, because the two CRMs expose lead identity differently:**
-- **DOM click strategy** (`content.ts` + `CrmAdapter.extractLeadId`): listens for clicks on `[data-lead-id]` elements. This only works against the mock CRM test page right now — neither real CRM exposes a usable DOM attribute.
-- **Network strategy** (`background.ts`, `chrome.webRequest.onBeforeRequest`): for `crm.builder.leadratd.com`, opening a lead's preview fires `GET https://api.crm.builder.leadratd.com/pre-sales/leads/{uuid}` — the UUID is extracted directly from that URL via regex. This is the one CRM where lead detection is confirmed working end-to-end.
+**2. Lead detection — three strategies, because the CRMs expose lead identity differently:**
+- **Page message strategy** (`content.ts` + `CrmAdapter.readPageMessage`, `leadscrm.ts`): `leads-crm-frontend`'s lead detail sheet is a React state overlay, not a route change - the URL never carries the lead id, so nothing in the DOM or network is stable to key off. Its `lead-detail-sheet.tsx` instead sends a same-origin `window.postMessage` (`shared/lib/ai-sdk-broadcast.ts` in that repo) on open/close, carrying the lead id and, when the lead has one, its project id and name. This is the one CRM this repo's own extension detects end-to-end today.
+- **DOM click strategy** (`content.ts` + `CrmAdapter.extractLeadId`): listens for clicks on `[data-lead-id]` elements. Exercised against the mock CRM test page; neither `leadrat.com` nor `leadratd.com` exposes a usable DOM attribute for this.
+- **Network strategy** (`background.ts`, `chrome.webRequest.onBeforeRequest`): for `crm.builder.leadratd.com`, opening a lead's preview fires `GET https://api.crm.builder.leadratd.com/pre-sales/leads/{uuid}` — the UUID is extracted directly from that URL via regex.
 - **LeadRat proper (`*.leadrat.com`) has no working detection yet** — it doesn't expose the ID in the URL, the DOM, or (as far as investigated) a distinct network call. The next avenue to try is walking React's internal fiber tree from the clicked DOM element (frameworks like React attach the component's props, including whatever lead object it was given, as hidden properties on the DOM node) — untested against the real app so far.
 
-**3. Side panel UI.** Whatever lead reference gets detected (by either strategy) is written to `chrome.storage.session` by the background worker, and the side panel (`App.tsx`) reads it via `services/leadContext.ts` and re-renders when it changes. A small "Detected lead · `{crm}` · `{leadId}`" banner always shows the last detected reference, independent of the mock-data toggle — useful for confirming detection is working without needing devtools open.
+**3. Side panel UI, wired to a real backend.** Whatever lead reference gets detected (by any strategy) is written to `chrome.storage.session` by the background worker; the side panel (`App.tsx`) reads it via `services/leadContext.ts`, asks the background worker to `POST /api/briefings` (which polls the async run and fetches the finished document), and renders the real 12-section briefing via `lib/mapBriefing.ts`. A small "Detected lead · `{crm}` · `{leadId}`" banner always shows the last detected reference (plus project, when one is known) — useful for confirming detection is working without needing devtools open. Closing the lead (a `LEAD_CLOSED` page message) clears both the detected-lead banner and the panel back to empty, rather than leaving a stale briefing on screen. `SHOW_MOCK_DATA` in `App.tsx` still exists for previewing the UI with no backend running at all.
 
-The actual briefing content (customer snapshot, objections, pending actions, etc.) is currently **always the hardcoded mock data** (`mock/leadBrief.ts`), controlled by the `SHOW_MOCK_DATA` flag at the top of `App.tsx`. This was intentionally decoupled from real detection while the UI was being built — flip it to `false` to make the panel depend on real detection again (it'll then log the detected lead reference to console and still show the mock briefing, since there's no backend to fetch a real one from).
+**4. The AI_NARRATIVE section.** The briefing's first section is a short paragraph from `leads-crm-backend`'s mounted `ai-query-sdk` instance (`POST /ai-sdk/query`, via `AiSdkQueryClient`) - genuinely different from LeadLens's own extraction pipeline: it is the CRM's own AI reading its own records, badged in the panel as "AI reading · not a CRM fact" rather than blended into the grounded sections. Absent (SDK unconfigured/unreachable) degrades this one section without affecting the rest of the document - see `leads-crm-backend/scripts/provision-ai-sdk.sh` for the one-time setup this needs (entities/fields/guardrails are runtime SQLite state inside that SDK, not code, so a fresh clone starts with none enabled). `LeadsCrmAdapter` also sends the lead's phone number on this query (sourced from the same tenant-filtered fetch, never guessed) so the SDK's own WhatsApp-chat-context feature can ground the narrative in that lead's WhatsApp thread when it is configured - a separate, SDK-side-only opt-in (`ai-sdk.whatsapp.*`, an Engageto API key) that this project's own config never touches.
 
 ## What's explicitly not implemented yet
 
-- **The extension never calls the backend.** The backend has real endpoints (`POST /api/briefings`, `GET /api/leads/{leadId}/report`, etc. - see `IMPLEMENTATION_PLAN.md` Part H) and a real pipeline behind them; nothing in `frontend/leadlens` calls any of it yet. Detected CRM/lead data is only logged to the console client-side.
-- No AI-generated briefing content **in the panel** — the briefing shown is 100% static mock data (`mock/leadBrief.ts`), independent of whether the backend could produce a real one.
-- No authentication end-to-end. The backend has a shared-token gate (`TokenAuthFilter`) ready to be sent by the extension; the extension doesn't send it yet.
-- No lead detection for LeadRat proper (`*.leadrat.com`) — only `leadrat-builder` works right now.
-- No `CrmAdapter` (backend side) targets the actual demo CRM (`leads-crm-backend`/`leads-crm-frontend`) this project now uses - the extension's detectors are still hardcoded to real `leadrat.com`/`leadratd.com` domains instead.
-- The `CrmAdapter` interface (extension side) only supports the DOM-click strategy formally; the network-based strategy for `leadrat-builder` is currently hardcoded in `background.ts` rather than generalized as a per-adapter capability. Worth generalizing once a second network-based CRM shows up.
+- No authentication end-to-end. The backend has a shared-token gate (`TokenAuthFilter`) the extension can send (`VITE_LEADLENS_API_TOKEN`); there is still no per-user identity, just a shared secret plus caller-asserted `X-LeadLens-Tenant`/`X-LeadLens-User` headers (Appendix 2 Q5 territory).
+- No lead detection for LeadRat proper (`*.leadrat.com`) — only `leadrat-builder` and `leadscrm` work right now.
+- `leadscrm`'s AI narrative source has no tenant model of its own to enforce - `LeadsCrmAdapter.narrate` requires a successful, tenant-filtered `fetchLead` first as the actual control (see that class's doc), but this is a hackathon-scale mitigation, not a production one.
+- The duplicate `GET /leads/{id}` `LeadsCrmAdapter` makes per briefing (once for the snapshot/evidence, again inside `narrate`'s tenant check) is unmerged - a known latency cost on the critical path, not a correctness issue.
 
 ## Running it
 
-**Frontend (extension):**
-```
-cd frontend/leadlens
-npm run dev:extension      # watches and rebuilds into build/
-```
-Then in `chrome://extensions`: enable Developer Mode → "Load unpacked" → select `frontend/leadlens/build`.
+The full loop (a real lead click producing a real briefing) needs four services up, plus one
+one-time setup step. See `../Plan.md` at the repo root for the end-to-end architecture; this is
+just the run order.
 
-**Backend (the extension doesn't call it yet, but it's a real API - see "Configuration and secrets" below for required env vars):**
-```
-cd backend/leadlens
-./mvnw spring-boot:run
-```
+| # | Service | Command | URL |
+|---|---|---|---|
+| 1 | `leads-crm-backend` | set `AI_SDK_ADMIN_PASSWORD` in `.env` (see below), then `docker compose up -d && set -a && source .env && set +a && ./mvnw spring-boot:run` | `http://localhost:8090/leads-crm` |
+| 2 | (once) provision the SDK | `AI_SDK_ADMIN_PASSWORD=... ../leads-crm-backend/scripts/provision-ai-sdk.sh` | — |
+| 3 | `leads-crm-frontend` | `npm run dev` | `http://localhost:5173` |
+| 4 | `leadlens` backend | `cd backend/leadlens && ./mvnw spring-boot:run` | `http://localhost:8080` |
+| 5 | extension | `cd frontend/leadlens && npm run dev:extension` | load unpacked `frontend/leadlens/build` |
+
+Setting `AI_SDK_ADMIN_PASSWORD` in `leads-crm-backend/.env` (12+ characters) is what makes step 2
+non-interactive - the SDK syncs its admin password from that env var on every boot, so there is no
+OTP to copy out of a log and paste into `/ai-sdk/setup` by hand. Leave it unset to use the
+one-time OTP flow instead; `provision-ai-sdk.sh` handles both.
+
+Fill in `backend/leadlens/.env.leadscrm` (copy from `.env.leadscrm.example`) before step 4 -
+every value in it is a demo-stopper if blank, and three of them fail with a message that does
+not say so (see that file's comments and `LeadsCrmProperties`' javadoc for the two different
+tenant ids this adapter needs).
 
 **Mock CRM test page** (for exercising the DOM click-detection path without needing real CRM access):
 ```

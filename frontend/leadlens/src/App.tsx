@@ -70,7 +70,15 @@ function App() {
 
     // Asks the background worker to do the actual POST /api/briefings -> poll -> GET round trip
     // (all network I/O stays in the service worker, per I.4) and renders whatever it returns.
-    const loadBrief = (reference: LeadReference) => {
+    const loadBrief = (reference: LeadReference | null) => {
+      if (!reference) {
+        // LEAD_CLOSED: nobody has a lead open any more, so a stale briefing must not linger.
+        setBrief(null)
+        setStatus('empty')
+        setErrorMessage(undefined)
+        return
+      }
+
       setStatus('loading')
       setErrorMessage(undefined)
 
@@ -104,7 +112,12 @@ function App() {
 
     // Independent of the briefing fetch above: this can say "ready" before generation finishes
     // (a pre-warmed briefing from Phase 9's worker) or "still preparing" while it's in flight.
-    const checkUpcoming = (reference: LeadReference) => {
+    const checkUpcoming = (reference: LeadReference | null) => {
+      if (!reference) {
+        setUpcoming(null)
+        return
+      }
+
       chrome.runtime
         .sendMessage({ type: 'CHECK_UPCOMING', payload: reference })
         .then((result: CheckUpcomingResult) => {
@@ -129,6 +142,7 @@ function App() {
       {detectedLead && (
         <div className="text-[10px] font-mono text-indigo-600 bg-indigo-50 border-b border-indigo-100 px-4 py-1.5 break-all shrink-0">
           Detected lead · {detectedLead.crm} · {detectedLead.leadId}
+          {detectedLead.projectName && <> · project {detectedLead.projectName}</>}
         </div>
       )}
 

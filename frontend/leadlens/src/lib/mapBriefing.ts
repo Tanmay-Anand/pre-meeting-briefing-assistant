@@ -17,6 +17,7 @@ export function mapBriefingToLeadBriefData(api: BriefingApiResponse): LeadBriefD
 
   const snapshotEntries = section('CUSTOMER_SNAPSHOT')?.entries
   const meetingEntries = section('MEETING_CONTEXT')?.entries
+  const narrativeSection = section('AI_NARRATIVE')
   const attentionSection = section('ATTENTION')
   const objectionsSection = section('OBJECTIONS')
   const commitmentsSection = section('COMMITMENTS')
@@ -45,7 +46,7 @@ export function mapBriefingToLeadBriefData(api: BriefingApiResponse): LeadBriefD
       timeline: entryText('Purchase timeline', snapshotEntries),
     },
     summary: {
-      text: summaryText(attentionSection),
+      ...narrativeSummary(narrativeSection, attentionSection),
       chips: [
         ...(objectionsSection?.renderState === 'RENDER'
           ? [{ label: `${objectionsSection.entries.length} open objection${objectionsSection.entries.length === 1 ? '' : 's'}`, tone: 'danger' as Tone }]
@@ -102,6 +103,29 @@ function summaryText(attention: BriefingSection | undefined): string {
     return sectionStatement(attention) ?? 'No summary available yet.'
   }
   return attention.entries.map((entry) => entry.text).join(' ')
+}
+
+/**
+ * Prefers the AI_NARRATIVE section - the CRM's own AI reading over its records - for the "Before
+ * you walk in" paragraph, falling back to the deterministic ATTENTION concatenation when the
+ * narrative is absent or DEGRADED (unconfigured CRM, unreachable SDK, disabled entity). Either
+ * way the panel always has something to show; only the badge tells the agent which one it is.
+ */
+function narrativeSummary(
+  narrative: BriefingSection | undefined,
+  attention: BriefingSection | undefined,
+): { text: string; source?: { label: string; unavailable?: boolean } } {
+  if (narrative?.renderState === 'RENDER' && narrative.entries[0]) {
+    const entry = narrative.entries[0]
+    const citation = entry.sources[0]?.label
+    return { text: entry.text, source: citation ? { label: citation } : undefined }
+  }
+
+  if (narrative?.renderState === 'DEGRADED') {
+    return { text: summaryText(attention), source: { label: 'CRM AI summary unavailable', unavailable: true } }
+  }
+
+  return { text: summaryText(attention) }
 }
 
 function toneForProvenance(provenance: BriefingEntry['provenance']): Tone {

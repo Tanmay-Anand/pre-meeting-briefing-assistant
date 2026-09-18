@@ -41,5 +41,23 @@ function handleClick(event: MouseEvent): void {
   })
 }
 
+function handlePageMessage(event: MessageEvent): void {
+  // Same-origin only: a page message from another frame/origin is not this CRM announcing its
+  // own state, and readPageMessage's contract assumes it only ever sees this page's own data.
+  if (event.source !== window || !adapter.readPageMessage) return
+
+  const reference = adapter.readPageMessage(event.data)
+  if (reference === undefined) return // not a message this adapter recognises
+
+  const message: ExtensionMessage =
+    reference === null ? { type: 'LEAD_CLOSED' } : { type: 'LEAD_OPENED', payload: reference }
+
+  console.info('[LeadBrief] Page message:', message)
+  chrome.runtime.sendMessage(message).catch((error) => {
+    console.warn('[LeadBrief] Failed to report page message', error)
+  })
+}
+
 notifyCrmDetected()
 document.addEventListener('click', handleClick, true)
+window.addEventListener('message', handlePageMessage)

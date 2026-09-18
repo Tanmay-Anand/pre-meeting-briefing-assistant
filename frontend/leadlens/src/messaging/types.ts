@@ -8,6 +8,12 @@ import type { BriefingApiResponse, UpcomingResponse } from '../types/briefingApi
 export type ExtensionMessage =
   | { type: 'CRM_CONTEXT'; payload: CrmContext }
   | { type: 'LEAD_CLICKED'; payload: LeadReference }
+  /** Sent by content.ts when a CrmAdapter's readPageMessage recognises a same-origin
+   *  window.postMessage from the CRM's own page as a lead opening (see leadscrm.ts). */
+  | { type: 'LEAD_OPENED'; payload: LeadReference }
+  /** The same channel's "lead closed" counterpart - clears the panel back to empty rather than
+   *  leaving a stale briefing on screen for a lead nobody has open any more. */
+  | { type: 'LEAD_CLOSED' }
   | { type: 'GENERATE_BRIEFING'; payload: LeadReference }
   | { type: 'CHECK_UPCOMING'; payload: LeadReference }
 

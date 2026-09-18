@@ -34,12 +34,12 @@ public class BriefingRunService {
 	}
 
 	@Async("briefingExecutor")
-	public void generateAsync(UUID runId, LeadRef ref, ActingUser user) {
+	public void generateAsync(UUID runId, LeadRef ref, ActingUser user, String projectRef) {
 		try {
 			RunProgressListener progress = (completed, total, label) ->
 					runs.recordProgress(runId, completed, "%s (%d/%d)".formatted(label, completed, total));
 
-			Briefing briefing = briefings.generateFull(ref, user, progress);
+			Briefing briefing = briefings.generateFull(ref, user, progress, projectRef);
 			runs.complete(runId, briefing.getId());
 		} catch (RuntimeException e) {
 			log.warn("Run {} failed for {}/{}: {}", runId, ref.crmKey(), ref.leadRef(), e.toString());

@@ -56,6 +56,14 @@ public class Briefing {
 	private String activityId;
 
 	/**
+	 * Project context supplied alongside the lead, when the CRM has one and the caller sent it -
+	 * carried here purely so {@code /refresh} can hand the same context back to the narrative
+	 * source without the caller having to remember and resend it.
+	 */
+	@Column(name = "project_ref", length = 128)
+	private String projectRef;
+
+	/**
 	 * Who it was generated for. Briefings are per-user because field masking is per-role: two
 	 * agents looking at the same lead may legitimately be owed different documents (F.7).
 	 */

@@ -30,6 +30,10 @@ export interface AiSummaryData {
   /** Substring of `text` to call out in red, e.g. the core objection. */
   highlight?: string
   chips: SummaryChip[]
+  /** Set only when `text` is a rendering of the AI_NARRATIVE section - the CRM's own AI reading,
+   *  as distinct from LeadLens's own extraction/grounding pipeline. Null when this fell back to
+   *  the ATTENTION-section summary instead, which is deterministic and needs no such badge. */
+  source?: { label: string; unavailable?: boolean }
 }
 
 export interface KeyInsight {

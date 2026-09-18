@@ -7,12 +7,14 @@ import java.util.Optional;
 import java.util.UUID;
 
 import com.leadlens.ai.LlmProperties;
+import com.leadlens.briefing.model.CrmNarrative;
 import com.leadlens.briefing.model.ProjectedSection;
 import com.leadlens.briefing.model.RenderState;
 import com.leadlens.common.clock.BriefingClock;
 import com.leadlens.common.tenant.ActingUser;
 import com.leadlens.crm.CrmAdapter;
 import com.leadlens.crm.CrmAdapterRegistry;
+import com.leadlens.crm.CrmNarrativeSource;
 import com.leadlens.crm.model.LeadRef;
 import com.leadlens.crm.model.LeadSnapshot;
 import com.leadlens.crm.model.ScheduledActivity;
@@ -49,6 +51,7 @@ public class BriefingService {
 	private final BriefingClock clock;
 	private final FactExtractor factExtractor;
 	private final TalkingPointsComposer talkingPointsComposer;
+	private final NarrativeProjector narrativeProjector;
 	private final LlmProperties llmProperties;
 
 	public BriefingService(
@@ -60,6 +63,7 @@ public class BriefingService {
 			BriefingClock clock,
 			FactExtractor factExtractor,
 			TalkingPointsComposer talkingPointsComposer,
+			NarrativeProjector narrativeProjector,
 			LlmProperties llmProperties) {
 		this.adapters = adapters;
 		this.evidenceRepository = evidenceRepository;
@@ -69,6 +73,7 @@ public class BriefingService {
 		this.clock = clock;
 		this.factExtractor = factExtractor;
 		this.talkingPointsComposer = talkingPointsComposer;
+		this.narrativeProjector = narrativeProjector;
 		this.llmProperties = llmProperties;
 	}
 
@@ -215,9 +220,13 @@ public class BriefingService {
 		return generateFull(ref, user, RunProgressListener.NOOP);
 	}
 
+	public Briefing generateFull(LeadRef ref, ActingUser user, RunProgressListener progress) {
+		return generateFull(ref, user, progress, null);
+	}
+
 	// Not @Transactional, for the same reason as ensureExtractedContext just above: this method
 	// calls it (self-invoked), and wrapping this one too would recreate the identical deadlock.
-	public Briefing generateFull(LeadRef ref, ActingUser user, RunProgressListener progress) {
+	public Briefing generateFull(LeadRef ref, ActingUser user, RunProgressListener progress, String projectRef) {
 		Instant now = clock.now();
 		Optional<Briefing> previous = findLatest(ref, user);
 		ExtractedContext extracted = ensureExtractedContext(ref, user, progress);
@@ -228,6 +237,10 @@ public class BriefingService {
 		List<ProjectedSection> inferential = new ArrayList<>(InferentialProjector.project(enriched, extractionComplete));
 		inferential.add(talkingPointsComposer.compose(enriched, extractionComplete));
 
+		int evidenceCount = enriched.evidence().size();
+		progress.onProgress(evidenceCount, evidenceCount, "Asking the CRM's AI for a narrative");
+		inferential.add(narrativeProjector.project(narrate(ref, user, projectRef)));
+
 		boolean anyDegraded = inferential.stream().anyMatch(section -> section.renderState() == RenderState.DEGRADED);
 
 		Briefing briefing = briefingRepository.save(Briefing.builder()
@@ -235,6 +248,7 @@ public class BriefingService {
 				.crmKey(ref.crmKey())
 				.leadRef(ref.leadRef())
 				.activityId(enriched.nextActivity().map(ScheduledActivity::activityId).orElse(null))
+				.projectRef(projectRef)
 				.generatedFor(user.userId())
 				.evidenceFingerprint(EvidenceFingerprint.of(enriched.evidence()))
 				.status(anyDegraded ? BriefingStatus.DEGRADED : BriefingStatus.COMPLETE)
@@ -265,6 +279,26 @@ public class BriefingService {
 	public Optional<Briefing> findLatest(LeadRef ref, ActingUser user) {
 		return briefingRepository.findFirstByTenantIdAndCrmKeyAndLeadRefAndGeneratedForOrderByCreatedAtDesc(
 				user.tenantId(), ref.crmKey(), ref.leadRef(), user.userId());
+	}
+
+	/**
+	 * Only calls the source once {@code adapter.fetchLead} has already succeeded for this exact
+	 * {@link LeadRef} earlier in this same run ({@link #ensureExtractedContext} calls
+	 * {@link #buildContext}, which does) - the CRM's own tenant-filtered API is what stands
+	 * between an id this user can see and one they cannot, since the narrative source's own
+	 * query engine may have no tenant model of its own to enforce that instead.
+	 */
+	private Optional<CrmNarrative> narrate(LeadRef ref, ActingUser user, String projectRef) {
+		CrmAdapter adapter = adapters.require(ref.crmKey());
+		if (!(adapter instanceof CrmNarrativeSource source)) {
+			return Optional.empty();
+		}
+		try {
+			return source.narrate(ref, user, Optional.ofNullable(projectRef));
+		} catch (RuntimeException e) {
+			log.warn("Narrative source failed for {}/{}: {}", ref.crmKey(), ref.leadRef(), e.toString());
+			return Optional.empty();
+		}
 	}
 
 	private void saveSection(UUID briefingId, ProjectedSection section) {

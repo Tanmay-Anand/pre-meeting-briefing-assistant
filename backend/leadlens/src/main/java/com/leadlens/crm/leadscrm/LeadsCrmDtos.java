@@ -103,6 +103,23 @@ final class LeadsCrmDtos {
 	record AiSdkTokenResponse(String token, Long expiresIn) {
 	}
 
+	// --- ai-query-sdk, /ai-sdk/query -----------------------------------------------------
+
+	record QueryRequest(String question, List<Target> targets, Options options) {
+		// phone is optional and Lead-only (see AiSdkQueryClient.narrate) - the SDK's own
+		// WhatsApp-chat-context feature (whatsapp/WhatsappContextProvider) resolves it from
+		// whichever traversed target it appears on, so a Project target simply omits it.
+		record Target(String entity, String id, String phone) {}
+
+		record Options(Integer childDepth, Integer parentDepth, Integer maxChildrenPerRelation) {}
+	}
+
+	@JsonIgnoreProperties(ignoreUnknown = true)
+	record QueryResponse(String answer, QueryMeta meta) {}
+
+	@JsonIgnoreProperties(ignoreUnknown = true)
+	record QueryMeta(String summarizerModel, String generatedAt) {}
+
 	@JsonIgnoreProperties(ignoreUnknown = true)
 	record DiscussionResponse(
 			long id,

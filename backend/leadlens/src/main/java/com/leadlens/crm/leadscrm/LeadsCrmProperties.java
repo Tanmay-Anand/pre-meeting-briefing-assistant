@@ -1,5 +1,7 @@
 package com.leadlens.crm.leadscrm;
 
+import java.time.Duration;
+
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
@@ -41,6 +43,11 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *                             a UUID. `[CORRECTED 2026-09-18]` - a first pass wrongly reused
  *                             {@link #tenantId} (LeadLens's own, non-UUID identity) for this
  * @param aiSdkAdminPassword   the ai-query-sdk instance's single admin password (see class doc)
+ * @param aiSdkQuestion        the question sent to {@code POST /ai-sdk/query} for the narrative
+ *                             section - see {@link AiSdkQueryClient}
+ * @param aiSdkQueryTimeout    per-call timeout for that query, shorter than the panel's own poll
+ *                             budget so a slow SDK degrades this one section instead of timing
+ *                             out the whole run
  */
 @ConfigurationProperties(prefix = "leadlens.crm.leadscrm")
 public record LeadsCrmProperties(
@@ -53,7 +60,15 @@ public record LeadsCrmProperties(
 		String tenantId,
 		String serviceUserId,
 		String crmTenantId,
-		String aiSdkAdminPassword) {
+		String aiSdkAdminPassword,
+		String aiSdkQuestion,
+		Duration aiSdkQueryTimeout) {
+
+	private static final String DEFAULT_QUESTION = """
+			This agent has a meeting with this lead shortly. In at most 120 words, summarise \
+			who this lead is, where they are in the pipeline, and the single most important \
+			thing to know before the conversation. Use only the records provided. If something \
+			is not in the records, do not mention it.""";
 
 	public LeadsCrmProperties {
 		baseUrl = (baseUrl == null || baseUrl.isBlank()) ? "http://localhost:8090/leads-crm" : baseUrl;
@@ -61,9 +76,11 @@ public record LeadsCrmProperties(
 				? "http://localhost:5173" : frontendOrigin;
 		tenantId = (tenantId == null || tenantId.isBlank()) ? "leadscrm-default" : tenantId;
 		serviceUserId = (serviceUserId == null || serviceUserId.isBlank()) ? "leadscrm-service" : serviceUserId;
+		aiSdkQuestion = (aiSdkQuestion == null || aiSdkQuestion.isBlank()) ? DEFAULT_QUESTION : aiSdkQuestion;
+		aiSdkQueryTimeout = aiSdkQueryTimeout == null ? Duration.ofSeconds(25) : aiSdkQueryTimeout;
 	}
 
-	public boolean meetingsConfigured() {
+	public boolean aiSdkConfigured() {
 		return aiSdkAdminPassword != null && !aiSdkAdminPassword.isBlank();
 	}
 }

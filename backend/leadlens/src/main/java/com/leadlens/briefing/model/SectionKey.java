@@ -14,18 +14,27 @@ package com.leadlens.briefing.model;
  */
 public enum SectionKey {
 
-	ATTENTION(0, false, RenderStyle.RANKED_LIST),
-	CUSTOMER_SNAPSHOT(1, false, RenderStyle.FIELD_TABLE),
-	MEETING_CONTEXT(2, false, RenderStyle.FIELD_TABLE),
-	RECENT_INTERACTIONS(3, true, RenderStyle.TIMELINE),
-	REQUIREMENTS(4, true, RenderStyle.FIELD_TABLE),
-	PROPERTIES_DISCUSSED(5, true, RenderStyle.TABLE),
-	OBJECTIONS(6, true, RenderStyle.LIST),
-	COMMITMENTS(7, true, RenderStyle.CHECKLIST),
-	TALKING_POINTS(8, true, RenderStyle.LIST),
-	MISSING_INFORMATION(9, false, RenderStyle.GROUPED_LIST),
-	SOURCE_REFERENCES(10, false, RenderStyle.LIST),
-	JOURNEY(11, false, RenderStyle.TIMELINE);
+	/**
+	 * Not part of the original 1-10/11/12 numbering (ledger #11, #12) - a further addition, same
+	 * spirit: it adds reading speed, not a new surface for invention, because it is a rendering
+	 * of a {@link com.leadlens.crm.CrmNarrativeSource} answer that is never fed back into fact
+	 * extraction. Ordered first because it is the one paragraph an agent reads before anything
+	 * else, not because it outranks the grounded sections in reliability - it is the only section
+	 * without a citeable {@code AtomicFact} behind it.
+	 */
+	AI_NARRATIVE(0, true, RenderStyle.PARAGRAPH),
+	ATTENTION(1, false, RenderStyle.RANKED_LIST),
+	CUSTOMER_SNAPSHOT(2, false, RenderStyle.FIELD_TABLE),
+	MEETING_CONTEXT(3, false, RenderStyle.FIELD_TABLE),
+	RECENT_INTERACTIONS(4, true, RenderStyle.TIMELINE),
+	REQUIREMENTS(5, true, RenderStyle.FIELD_TABLE),
+	PROPERTIES_DISCUSSED(6, true, RenderStyle.TABLE),
+	OBJECTIONS(7, true, RenderStyle.LIST),
+	COMMITMENTS(8, true, RenderStyle.CHECKLIST),
+	TALKING_POINTS(9, true, RenderStyle.LIST),
+	MISSING_INFORMATION(10, false, RenderStyle.GROUPED_LIST),
+	SOURCE_REFERENCES(11, false, RenderStyle.LIST),
+	JOURNEY(12, false, RenderStyle.TIMELINE);
 
 	private final int ordinalInBrief;
 	private final boolean usesModel;

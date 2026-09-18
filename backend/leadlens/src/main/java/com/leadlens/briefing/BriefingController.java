@@ -112,7 +112,7 @@ public class BriefingController {
 			return ResponseEntity.ok(toResponse(cached.get()));
 		}
 
-		return accepted(ref, user, extracted.context().evidence().size());
+		return accepted(ref, user, extracted.context().evidence().size(), request.projectRef());
 	}
 
 	/** Forces regeneration, reusing whatever extractions are already cached (D.5). */
@@ -130,7 +130,7 @@ public class BriefingController {
 		LeadRef ref = new LeadRef(existing.getCrmKey(), existing.getLeadRef());
 		long evidenceCount = evidenceRepository.countByTenantIdAndLeadRef(tenantId, ref.leadRef());
 
-		return accepted(ref, user, (int) evidenceCount);
+		return accepted(ref, user, (int) evidenceCount, existing.getProjectRef());
 	}
 
 	/**
@@ -221,9 +221,9 @@ public class BriefingController {
 		return diffs.diff(since, briefingId);
 	}
 
-	private ResponseEntity<Map<String, Object>> accepted(LeadRef ref, ActingUser user, int totalItems) {
+	private ResponseEntity<Map<String, Object>> accepted(LeadRef ref, ActingUser user, int totalItems, String projectRef) {
 		UUID runId = runs.start(user.tenantId(), ref.crmKey(), ref.leadRef(), totalItems);
-		runService.generateAsync(runId, ref, user);
+		runService.generateAsync(runId, ref, user, projectRef);
 		return ResponseEntity.status(HttpStatus.ACCEPTED).body(Map.of("runId", runId));
 	}
 
@@ -273,7 +273,7 @@ public class BriefingController {
 				sections);
 	}
 
-	public record GenerateRequest(@NotBlank String crmKey, @NotBlank String leadRef) {
+	public record GenerateRequest(@NotBlank String crmKey, @NotBlank String leadRef, String projectRef) {
 	}
 
 	public record BriefingResponse(

@@ -18,6 +18,7 @@ export type EntryFlag =
   | 'NOT_SUMMARISED'
 
 export type SectionKey =
+  | 'AI_NARRATIVE'
   | 'ATTENTION'
   | 'CUSTOMER_SNAPSHOT'
   | 'MEETING_CONTEXT'

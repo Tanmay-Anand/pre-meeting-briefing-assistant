@@ -15,19 +15,29 @@ export async function setCurrentLead(reference: LeadReference): Promise<void> {
   await chrome.storage.session.set({ [STORAGE_KEY]: reference })
 }
 
+/** Clears the stored lead - the LEAD_CLOSED counterpart to setCurrentLead, so the panel can
+ *  tell "no lead is open" apart from "still waiting to hear about one". */
+export async function clearCurrentLead(): Promise<void> {
+  if (!hasSessionStorage()) return
+  await chrome.storage.session.remove(STORAGE_KEY)
+}
+
 export async function getCurrentLeadReference(): Promise<LeadReference | null> {
   if (!hasSessionStorage()) return null
   const result = await chrome.storage.session.get(STORAGE_KEY)
   return (result[STORAGE_KEY] as LeadReference | undefined) ?? null
 }
 
-export function subscribeToLeadChanges(callback: (reference: LeadReference) => void): () => void {
+/** @param callback called with the new reference, or null when the lead was cleared
+ *  (clearCurrentLead) rather than replaced with another one. */
+export function subscribeToLeadChanges(callback: (reference: LeadReference | null) => void): () => void {
   if (!hasSessionStorage()) return () => {}
 
   const listener = (changes: Record<string, chrome.storage.StorageChange>, areaName: string) => {
     if (areaName !== 'session') return
     const change = changes[STORAGE_KEY]
-    if (change?.newValue) callback(change.newValue as LeadReference)
+    if (!change) return
+    callback((change.newValue as LeadReference | undefined) ?? null)
   }
 
   chrome.storage.onChanged.addListener(listener)

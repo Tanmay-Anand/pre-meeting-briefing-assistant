@@ -7,7 +7,7 @@ interface AiSummaryProps {
 
 /** "Before you walk in" callout: the one-paragraph brief + quick-scan chips. */
 export default function AiSummary({ summary }: AiSummaryProps) {
-  const { text, highlight, chips } = summary
+  const { text, highlight, chips, source } = summary
   const highlightIndex = highlight ? text.indexOf(highlight) : -1
   const before = highlightIndex >= 0 ? text.slice(0, highlightIndex) : text
   const after = highlightIndex >= 0 ? text.slice(highlightIndex + (highlight?.length ?? 0)) : ''
@@ -31,6 +31,11 @@ export default function AiSummary({ summary }: AiSummaryProps) {
         {highlightIndex >= 0 && <span className="text-red-600 font-semibold">{highlight}</span>}
         {after}
       </p>
+      {source && (
+        <p className={`text-[10px] mt-1.5 ${source.unavailable ? 'text-slate-400 italic' : 'text-indigo-400'}`}>
+          {source.unavailable ? source.label : `AI reading · not a CRM fact · ${source.label}`}
+        </p>
+      )}
       {chips.length > 0 && (
         <div className="flex flex-wrap gap-1.5 mt-3">
           {chips.map((chip) => (

@@ -1,4 +1,4 @@
-import { setCurrentLead } from '../services/leadContext'
+import { clearCurrentLead, setCurrentLead } from '../services/leadContext'
 import { generateBriefing, fetchUpcoming, BackendError } from './backendClient'
 import type { ExtensionMessage, GenerateBriefingResult, CheckUpcomingResult } from '../messaging/types'
 
@@ -63,11 +63,32 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender) => {
     return false
   }
 
+  if (message.type === 'LEAD_OPENED') {
+    const tabId = sender.tab?.id
+    // Same synchronous-gesture requirement as LEAD_CLICKED above - see that branch's comment.
+    if (tabId !== undefined) {
+      chrome.sidePanel.open({ tabId }).catch((error: unknown) => {
+        console.error('[LeadBrief] Failed to open side panel for lead (page message)', error)
+      })
+    }
+    setCurrentLead(message.payload).catch((error: unknown) => {
+      console.error('[LeadBrief] Failed to store lead reference (page message)', error)
+    })
+    return false
+  }
+
+  if (message.type === 'LEAD_CLOSED') {
+    clearCurrentLead().catch((error: unknown) => {
+      console.error('[LeadBrief] Failed to clear lead reference', error)
+    })
+    return false
+  }
+
   if (message.type === 'GENERATE_BRIEFING') {
     // Returning a Promise here is how Chrome sends an async response in MV3 — the panel's
     // sendMessage call resolves with whatever this resolves to. All network I/O stays in this
     // worker, never in the panel itself (I.4).
-    return generateBriefing(message.payload.crm, message.payload.leadId)
+    return generateBriefing(message.payload)
       .then((briefing): GenerateBriefingResult => ({ ok: true, briefing }))
       .catch((error: unknown): GenerateBriefingResult => ({ ok: false, error: toErrorMessage(error) }))
   }

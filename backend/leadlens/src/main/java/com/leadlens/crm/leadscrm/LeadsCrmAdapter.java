@@ -11,8 +11,10 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+import com.leadlens.briefing.model.CrmNarrative;
 import com.leadlens.common.tenant.ActingUser;
 import com.leadlens.crm.CrmAdapter;
+import com.leadlens.crm.CrmNarrativeSource;
 import com.leadlens.crm.leadscrm.LeadsCrmDtos.DiscussionResponse;
 import com.leadlens.crm.leadscrm.LeadsCrmDtos.LeadResponse;
 import com.leadlens.crm.leadscrm.LeadsCrmDtos.LeadsPage;
@@ -60,9 +62,17 @@ import org.springframework.web.client.RestClient;
  * instance mounted inside the same backend ({@link AiSdkMeetingClient}), so Google
  * Calendar/Recall.ai capture becomes ordinary {@code MEETING}-type evidence the existing
  * extraction pipeline already knows how to read - no new extraction logic needed.
+ *
+ * <h2>The AI narrative</h2>
+ * {@link #narrate} is the second, separate use of that same SDK instance: a CRM-wide question
+ * answered by its own query/summarise engine, rendered as one section rather than mined for
+ * facts. Unlike this adapter's own API, that SDK has no tenant model at all - it is not what
+ * stands between one tenant's lead ids and another's. {@link #fetchLead} is, so {@link #narrate}
+ * requires a successful fetch through it first: an id this service identity cannot already read
+ * through the CRM's own tenant-filtered API never reaches the SDK's query endpoint either.
  */
 @Component
-public class LeadsCrmAdapter implements CrmAdapter {
+public class LeadsCrmAdapter implements CrmAdapter, CrmNarrativeSource {
 
 	private static final Logger log = LoggerFactory.getLogger(LeadsCrmAdapter.class);
 
@@ -74,17 +84,20 @@ public class LeadsCrmAdapter implements CrmAdapter {
 	private final LeadsCrmProperties properties;
 	private final CognitoServiceAuthClient auth;
 	private final AiSdkMeetingClient meetings;
+	private final AiSdkQueryClient narrative;
 	private volatile RestClient http;
 
 	public LeadsCrmAdapter(
 			RestClient.Builder builder,
 			LeadsCrmProperties properties,
 			CognitoServiceAuthClient auth,
-			AiSdkMeetingClient meetings) {
+			AiSdkMeetingClient meetings,
+			AiSdkQueryClient narrative) {
 		this.builder = builder;
 		this.properties = properties;
 		this.auth = auth;
 		this.meetings = meetings;
+		this.narrative = narrative;
 	}
 
 	private RestClient http() {
@@ -127,6 +140,15 @@ public class LeadsCrmAdapter implements CrmAdapter {
 
 	@Override
 	public LeadSnapshot fetchLead(LeadRef ref, ActingUser user) {
+		return toSnapshot(ref, fetchLeadResponse(ref, user));
+	}
+
+	/**
+	 * The one place {@code GET /leads/{id}} is actually called - {@link #fetchLead},
+	 * {@link #fetchUpcoming} and {@link #narrate} all go through this instead of each issuing
+	 * their own request for the same lead.
+	 */
+	private LeadResponse fetchLeadResponse(LeadRef ref, ActingUser user) {
 		LeadResponse lead = http().get()
 				.uri("/leads/{id}", ref.leadRef())
 				.headers(this::applyIdentity)
@@ -137,7 +159,7 @@ public class LeadsCrmAdapter implements CrmAdapter {
 			throw new IllegalStateException("leads-crm-backend returned no body for lead " + ref.leadRef());
 		}
 
-		return toSnapshot(ref, lead);
+		return lead;
 	}
 
 	@Override
@@ -192,13 +214,9 @@ public class LeadsCrmAdapter implements CrmAdapter {
 
 	@Override
 	public List<ScheduledActivity> fetchUpcoming(LeadRef ref, ActingUser user) {
-		LeadResponse lead = http().get()
-				.uri("/leads/{id}", ref.leadRef())
-				.headers(this::applyIdentity)
-				.retrieve()
-				.body(LeadResponse.class);
+		LeadResponse lead = fetchLeadResponse(ref, user);
 
-		if (lead == null || lead.scheduleDate() == null) {
+		if (lead.scheduleDate() == null) {
 			return List.of();
 		}
 
@@ -240,6 +258,37 @@ public class LeadsCrmAdapter implements CrmAdapter {
 	@Override
 	public List<ActingUser> serviceIdentities() {
 		return List.of(new ActingUser(properties.tenantId(), properties.serviceUserId(), Set.of()));
+	}
+
+	@Override
+	public Optional<CrmNarrative> narrate(LeadRef ref, ActingUser user, Optional<String> project) {
+		// fetchLeadResponse first, and let its exception (tenant mismatch, 404, network)
+		// propagate: an id this service identity cannot read through the CRM's own
+		// tenant-filtered API must never reach the SDK's query endpoint either, since that
+		// endpoint has no tenant model of its own to refuse it there instead.
+		LeadResponse lead = fetchLeadResponse(ref, user);
+		return narrative.narrate(ref.leadRef(), project, leadPhone(lead));
+	}
+
+	/**
+	 * The mobile number, E.164-ish and digits-only, for the SDK's WhatsApp-chat-context feature
+	 * (its own {@code LeadPhoneResolver} would otherwise have to find this itself from whatever
+	 * fields the query result happens to expose - and {@code mobile} is deliberately marked
+	 * sensitive/not-exposed in {@code provision-ai-sdk.sh}, so it would not find it that way).
+	 * Passing it explicitly, sourced from the same tenant-filtered fetch {@link #narrate} already
+	 * required, keeps the PII masking real while still letting WhatsApp history ground the
+	 * narrative. Absent rather than guessed when there is no mobile on record.
+	 */
+	private static Optional<String> leadPhone(LeadResponse lead) {
+		if (lead.mobile() == null || lead.mobile().isBlank()) {
+			return Optional.empty();
+		}
+		// Prepend the country code when this CRM recorded one - the SDK's own resolver only
+		// assumes a default country code (91) for a bare 10-digit number, so leaving it off
+		// entirely for a lead that isn't Indian would normalize to the wrong country silently.
+		String withCountryCode = (lead.countryCode() == null || lead.countryCode().isBlank())
+				? lead.mobile() : lead.countryCode() + lead.mobile();
+		return Optional.of(withCountryCode);
 	}
 
 	// --- mapping -------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-import type { CrmType } from '../types/crm'
+import type { CrmType, LeadReference } from '../types/crm'
 import type { BriefingApiResponse, RunResponse, UpcomingResponse } from '../types/briefingApi'
 
 const DEFAULT_BASE_URL = 'http://localhost:8080'
@@ -94,8 +94,8 @@ async function pollRun(tenantId: string, runId: string): Promise<RunResponse> {
  * accepted, then GET the finished document. All network I/O lives here in the service worker,
  * never in the content script or the panel (I.4).
  */
-export async function generateBriefing(crm: CrmType, leadId: string): Promise<BriefingApiResponse> {
-  const identity = ACTING_USER[crm] ?? ACTING_USER.unknown
+export async function generateBriefing(reference: LeadReference): Promise<BriefingApiResponse> {
+  const identity = ACTING_USER[reference.crm] ?? ACTING_USER.unknown
   const requestHeaders = headers({
     'X-LeadLens-Tenant': identity.tenantId,
     'X-LeadLens-User': identity.userId,
@@ -105,7 +105,11 @@ export async function generateBriefing(crm: CrmType, leadId: string): Promise<Br
     await fetch(`${baseUrl()}/api/briefings`, {
       method: 'POST',
       headers: requestHeaders,
-      body: JSON.stringify({ crmKey: crm, leadRef: leadId }),
+      body: JSON.stringify({
+        crmKey: reference.crm,
+        leadRef: reference.leadId,
+        projectRef: reference.projectId ?? null,
+      }),
     }),
   )
 
