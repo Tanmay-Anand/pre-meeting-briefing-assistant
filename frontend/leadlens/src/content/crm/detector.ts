@@ -1,6 +1,8 @@
 import type { CrmAdapter } from './types'
 import { leadratAdapter } from './leadrat'
 import { leadratBuilderAdapter } from './leadratBuilder'
+import { leadscrmAdapter } from './leadscrm'
+import { demoAdapter } from './demo'
 import { genericAdapter } from './generic'
 
 /**
@@ -8,17 +10,18 @@ import { genericAdapter } from './generic'
  * adapter file next to this one and register it here — nothing else in the
  * extension (content script, background worker, UI) needs to change.
  */
-const adapters: CrmAdapter[] = [leadratAdapter, leadratBuilderAdapter]
+const adapters: CrmAdapter[] = [leadratAdapter, leadratBuilderAdapter, leadscrmAdapter, demoAdapter]
 
 export function detectCrm(url: string): CrmAdapter {
-  const hostname = safeHostname(url)
-  return adapters.find((adapter) => adapter.matchesHost(hostname)) ?? genericAdapter
+  const { hostname, port } = safeUrlParts(url)
+  return adapters.find((adapter) => adapter.matchesHost(hostname, port)) ?? genericAdapter
 }
 
-function safeHostname(url: string): string {
+function safeUrlParts(url: string): { hostname: string; port: string } {
   try {
-    return new URL(url).hostname
+    const parsed = new URL(url)
+    return { hostname: parsed.hostname, port: parsed.port }
   } catch {
-    return ''
+    return { hostname: '', port: '' }
   }
 }

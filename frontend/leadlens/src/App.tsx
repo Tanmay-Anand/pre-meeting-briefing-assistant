@@ -12,10 +12,14 @@ import Sources from './components/Sources'
 import Divider from './components/Divider'
 import BottomBar from './components/BottomBar'
 import StatusView, { type BriefStatus } from './components/StatusView'
+import UpcomingMeetingBanner from './components/UpcomingMeetingBanner'
 import { getCurrentLeadReference, subscribeToLeadChanges } from './services/leadContext'
 import { mockLeadBrief } from './mock/leadBrief'
+import { mapBriefingToLeadBriefData } from './lib/mapBriefing'
 import type { LeadBriefData } from './types/leadBrief'
+import type { UpcomingResponse } from './types/briefingApi'
 import type { CrmType, LeadReference } from './types/crm'
+import type { GenerateBriefingResult, CheckUpcomingResult } from './messaging/types'
 
 function isExtensionContext(): boolean {
   return typeof chrome !== 'undefined' && !!chrome.runtime?.id
@@ -24,13 +28,16 @@ function isExtensionContext(): boolean {
 const CRM_LABELS: Record<CrmType, string> = {
   leadrat: 'LeadRat',
   'leadrat-builder': 'LeadRat Builder',
+  leadscrm: 'LeadsCRM',
+  demo: 'Demo CRM',
   unknown: 'CRM',
 }
 
-// While the UI is being built, always show the dummy briefing instead of
-// waiting on a real CRM click + backend round trip. Set this back to false
-// to resume exercising the real content-script/background/API flow.
-const SHOW_MOCK_DATA = true
+// Outside the extension (plain `npm run dev` in a browser tab) there is no content script, no
+// background worker and no guaranteed backend — force the mock so the UI stays previewable.
+// Inside the extension this is false: a real lead click drives a real backend round trip.
+// Flip to true to preview the UI against the dummy briefing without a backend running at all.
+const SHOW_MOCK_DATA = false
 
 function App() {
   // Outside the extension (plain `npm run dev` in a browser tab) there is no
@@ -47,6 +54,8 @@ function App() {
   // (click message or network watcher) last found, so detection can be
   // verified against real CRMs while the panel still shows dummy data.
   const [detectedLead, setDetectedLead] = useState<LeadReference | null>(null)
+  const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined)
+  const [upcoming, setUpcoming] = useState<UpcomingResponse | null>(null)
 
   useEffect(() => {
     if (!isExtensionContext()) return
@@ -59,13 +68,28 @@ function App() {
   useEffect(() => {
     if (SHOW_MOCK_DATA || !isExtensionContext()) return
 
-    // No backend to fetch a real briefing from yet — log what detection
-    // found and fall back to the local mock data so the panel still shows
-    // something. Swap this for a real fetch once there's an API again.
+    // Asks the background worker to do the actual POST /api/briefings -> poll -> GET round trip
+    // (all network I/O stays in the service worker, per I.4) and renders whatever it returns.
     const loadBrief = (reference: LeadReference) => {
-      console.log('[LeadBrief] Lead detected:', reference)
-      setBrief(mockLeadBrief)
-      setStatus('ready')
+      setStatus('loading')
+      setErrorMessage(undefined)
+
+      chrome.runtime
+        .sendMessage({ type: 'GENERATE_BRIEFING', payload: reference })
+        .then((result: GenerateBriefingResult) => {
+          if (result.ok) {
+            setBrief(mapBriefingToLeadBriefData(result.briefing))
+            setStatus('ready')
+          } else {
+            setErrorMessage(result.error)
+            setStatus('error')
+          }
+        })
+        .catch((error: unknown) => {
+          console.error('[LeadBrief] Failed to generate briefing', error)
+          setErrorMessage(error instanceof Error ? error.message : 'Unknown error')
+          setStatus('error')
+        })
     }
 
     getCurrentLeadReference().then((reference) => {
@@ -73,6 +97,27 @@ function App() {
     })
 
     return subscribeToLeadChanges(loadBrief)
+  }, [])
+
+  useEffect(() => {
+    if (SHOW_MOCK_DATA || !isExtensionContext()) return
+
+    // Independent of the briefing fetch above: this can say "ready" before generation finishes
+    // (a pre-warmed briefing from Phase 9's worker) or "still preparing" while it's in flight.
+    const checkUpcoming = (reference: LeadReference) => {
+      chrome.runtime
+        .sendMessage({ type: 'CHECK_UPCOMING', payload: reference })
+        .then((result: CheckUpcomingResult) => {
+          setUpcoming(result.ok && result.upcoming.minutesUntil !== null ? result.upcoming : null)
+        })
+        .catch(() => setUpcoming(null))
+    }
+
+    getCurrentLeadReference().then((reference) => {
+      if (reference) checkUpcoming(reference)
+    })
+
+    return subscribeToLeadChanges(checkUpcoming)
   }, [])
 
   const crmLabel = detectedLead ? CRM_LABELS[detectedLead.crm] : (brief?.crmName ?? 'CRM')
@@ -89,6 +134,7 @@ function App() {
 
       {brief && status === 'ready' ? (
         <>
+          {upcoming && <UpcomingMeetingBanner upcoming={upcoming} />}
           <CustomerHeader customer={brief.customer} meeting={brief.meeting} />
 
           <div className="flex-1 overflow-y-auto px-4 py-4 space-y-1" style={{ scrollbarWidth: 'thin' }}>
@@ -110,7 +156,7 @@ function App() {
           <BottomBar updatedAt={brief.updatedAt} />
         </>
       ) : (
-        <StatusView status={status === 'ready' ? 'empty' : status} />
+        <StatusView status={status === 'ready' ? 'empty' : status} errorMessage={errorMessage} />
       )}
     </div>
   )

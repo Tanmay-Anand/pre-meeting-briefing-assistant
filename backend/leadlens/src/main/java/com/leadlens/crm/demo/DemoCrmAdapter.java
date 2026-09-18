@@ -98,6 +98,13 @@ public class DemoCrmAdapter implements CrmAdapter {
 	}
 
 	@Override
+	public String urlPattern() {
+		// Kept identical to the extension's own BUILT_IN_PATTERNS fallback (url-parser.ts) -
+		// this endpoint is meant to become the single source of truth for it, not a second one.
+		return "^https?://[^/]+/leads/(?<leadId>[^/?#]+)";
+	}
+
+	@Override
 	public Optional<LeadRef> resolveLead(URI pageUrl) {
 		if (pageUrl == null || pageUrl.getPath() == null) {
 			return Optional.empty();
@@ -177,6 +184,32 @@ public class DemoCrmAdapter implements CrmAdapter {
 	@Override
 	public String deepLinkFor(EvidenceItem item) {
 		return deepLink(item.getLeadRef(), item.getEvidenceKey());
+	}
+
+	@Override
+	public List<LeadRef> listActiveLeads(ActingUser user) {
+		List<com.leadlens.democrm.DemoCrmDtos.LeadSummaryResponse> response = http().get()
+				.uri("/api/democrm/leads")
+				.headers(headers -> applyIdentity(headers, user))
+				.retrieve()
+				.body(new org.springframework.core.ParameterizedTypeReference<
+						List<com.leadlens.democrm.DemoCrmDtos.LeadSummaryResponse>>() {
+				});
+
+		if (response == null) {
+			return List.of();
+		}
+		return response.stream().map(lead -> new LeadRef(CRM_KEY, lead.id())).toList();
+	}
+
+	@Override
+	public List<ActingUser> serviceIdentities() {
+		// The Demo CRM's own seeded tenants (DemoDataSeeder). Hardcoded here rather than in the
+		// generic scheduler: which identities are safe to scan as is Demo-CRM-specific knowledge,
+		// not something the worker should need to know about any particular CRM.
+		return List.of(
+				new ActingUser("t-acme", "u-priya", java.util.Set.of("SALES_AGENT")),
+				new ActingUser("t-globex", "u-meera", java.util.Set.of("SALES_AGENT")));
 	}
 
 	private EvidenceItem toEvidence(LeadRef ref, ActingUser user, ActivityResponse activity) {

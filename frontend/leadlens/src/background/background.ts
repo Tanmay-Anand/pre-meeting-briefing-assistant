@@ -1,5 +1,10 @@
 import { setCurrentLead } from '../services/leadContext'
-import type { ExtensionMessage } from '../messaging/types'
+import { generateBriefing, fetchUpcoming, BackendError } from './backendClient'
+import type { ExtensionMessage, GenerateBriefingResult, CheckUpcomingResult } from '../messaging/types'
+
+function toErrorMessage(error: unknown): string {
+  return error instanceof BackendError || error instanceof Error ? error.message : 'Unknown error'
+}
 
 // crm.builder.leadratd.com doesn't expose the lead ID in the URL or the DOM —
 // opening a lead's preview fires GET /pre-sales/leads/{uuid}, so that network
@@ -12,15 +17,19 @@ chrome.webRequest.onBeforeRequest.addListener(
     const match = details.url.match(LEADRAT_BUILDER_LEAD_PATTERN)
     if (!match) return
 
-    setCurrentLead({ crm: 'leadrat-builder', leadId: match[1] })
-      .then(() => {
-        if (details.tabId >= 0) {
-          return chrome.sidePanel.open({ tabId: details.tabId })
-        }
+    // sidePanel.open() must be called synchronously in the handler, before any await/.then —
+    // Chrome only honors it within the same turn as the triggering event, and a network
+    // request isn't a user gesture to begin with, so this may still be refused by Chrome. The
+    // storage write below has no such restriction and can safely stay async.
+    if (details.tabId >= 0) {
+      chrome.sidePanel.open({ tabId: details.tabId }).catch((error: unknown) => {
+        console.error('[LeadBrief] Failed to open side panel for lead (network-detected)', error)
       })
-      .catch((error: unknown) => {
-        console.error('[LeadBrief] Failed to store lead detected via network call', error)
-      })
+    }
+
+    setCurrentLead({ crm: 'leadrat-builder', leadId: match[1] }).catch((error: unknown) => {
+      console.error('[LeadBrief] Failed to store lead detected via network call', error)
+    })
   },
   { urls: ['https://api.crm.builder.leadratd.com/pre-sales/leads/*'] },
 )
@@ -39,16 +48,34 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender) => {
 
   if (message.type === 'LEAD_CLICKED') {
     const tabId = sender.tab?.id
-    setCurrentLead(message.payload)
-      .then(() => {
-        if (tabId !== undefined) {
-          return chrome.sidePanel.open({ tabId })
-        }
-      })
-      .catch((error: unknown) => {
+    // sidePanel.open() must be the first thing called, synchronously, in this listener —
+    // Chrome only honors "may only be called in response to a user gesture" within the same
+    // synchronous turn as the message that carried it. Calling it after an awaited
+    // setCurrentLead() (as this used to) loses that window and Chrome silently refuses it.
+    if (tabId !== undefined) {
+      chrome.sidePanel.open({ tabId }).catch((error: unknown) => {
         console.error('[LeadBrief] Failed to open side panel for lead', error)
       })
+    }
+    setCurrentLead(message.payload).catch((error: unknown) => {
+      console.error('[LeadBrief] Failed to store lead reference', error)
+    })
     return false
+  }
+
+  if (message.type === 'GENERATE_BRIEFING') {
+    // Returning a Promise here is how Chrome sends an async response in MV3 — the panel's
+    // sendMessage call resolves with whatever this resolves to. All network I/O stays in this
+    // worker, never in the panel itself (I.4).
+    return generateBriefing(message.payload.crm, message.payload.leadId)
+      .then((briefing): GenerateBriefingResult => ({ ok: true, briefing }))
+      .catch((error: unknown): GenerateBriefingResult => ({ ok: false, error: toErrorMessage(error) }))
+  }
+
+  if (message.type === 'CHECK_UPCOMING') {
+    return fetchUpcoming(message.payload.crm, message.payload.leadId)
+      .then((upcoming): CheckUpcomingResult => ({ ok: true, upcoming }))
+      .catch((error: unknown): CheckUpcomingResult => ({ ok: false, error: toErrorMessage(error) }))
   }
 
   return false
