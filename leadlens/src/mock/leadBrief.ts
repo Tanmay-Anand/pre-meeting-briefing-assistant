@@ -17,15 +17,21 @@ export const mockLeadBrief: LeadBriefData = {
   },
   snapshot: {
     status: 'Negotiation',
-    requirement: '',
-    budget: '',
-    preferredLocation: '',
+    requirement: '3BHK Apartment',
+    budget: '₹1.5–1.8 Cr',
+    preferredLocation: 'Whitefield, Bangalore',
     timeline: 'Within 3 months',
   },
   summary: {
     text: 'Rahul is actively considering this project but pricing remains the main concern. He requested a revised payment plan and is expecting an update before the meeting.',
     highlight: 'pricing remains the main concern',
-    chips: [],
+    chips: [
+      { label: 'Negotiation', tone: 'warn' },
+      { label: 'Pricing concern', tone: 'danger' },
+      { label: 'Interested in Project B', tone: 'accent' },
+      { label: 'Payment plan requested', tone: 'warn' },
+      { label: 'Site visit pending', tone: 'neutral' },
+    ],
     source: { label: 'CRM AI · anthropic/claude-sonnet-4.5' },
   },
 }

@@ -21,16 +21,14 @@ export default function CustomerSnapshot({ snapshot }: CustomerSnapshotProps) {
         {FIELDS.map(({ key, label, accent }) => (
           <div
             key={key}
-            className={`rounded-lg border px-3 py-2.5 ${accent ? 'border-amber-200 bg-amber-50' : 'border-slate-100 bg-white'}`}
+            className={`rounded-lg border px-3 py-2.5 ${accent ? 'border-line bg-warning-soft' : 'border-line bg-white'}`}
           >
             <p
-              className={`text-[10px] font-semibold uppercase tracking-wider mb-0.5 ${accent ? 'text-amber-500' : 'text-slate-400'}`}
+              className={`text-[10px] font-semibold uppercase tracking-wider mb-0.5 ${accent ? 'text-warning' : 'text-muted'}`}
             >
               {label}
             </p>
-            <p className={`text-[12.5px] font-bold ${accent ? 'text-amber-800' : 'text-slate-800'}`}>
-              {snapshot[key]}
-            </p>
+            <p className="text-[12.5px] font-bold text-ink">{snapshot[key]}</p>
           </div>
         ))}
       </div>
