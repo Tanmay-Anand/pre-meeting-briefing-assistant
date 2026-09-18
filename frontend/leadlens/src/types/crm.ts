@@ -1,4 +1,4 @@
-export type CrmType = 'leadrat' | 'leadrat-builder' | 'unknown'
+export type CrmType = 'leadrat' | 'leadrat-builder' | 'leadscrm' | 'demo' | 'unknown'
 
 export interface CrmContext {
   crm: CrmType

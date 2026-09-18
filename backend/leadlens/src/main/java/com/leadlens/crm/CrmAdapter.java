@@ -37,6 +37,17 @@ public interface CrmAdapter {
 	boolean supports(URI pageUrl);
 
 	/**
+	 * A JS/Java-compatible regex with a named {@code leadId} group, served to the extension via
+	 * {@code GET /api/crm/adapters} so a CRM's URL shape can change without reinstalling it
+	 * (G.3's selector-configuration idea, generalised to every adapter rather than only DOM
+	 * ones). Null means this adapter's shape cannot be expressed as one pattern - the content
+	 * script then has nothing to match against for this CRM and simply does not offer it.
+	 */
+	default String urlPattern() {
+		return null;
+	}
+
+	/**
 	 * Resolves the lead from the page URL, or empty when the URL identifies no lead.
 	 *
 	 * <p>Empty is a real answer. The caller must say "no lead found on this page" rather than
@@ -64,4 +75,30 @@ public interface CrmAdapter {
 	 * fall back to the lead page rather than returning a link that 404s.
 	 */
 	String deepLinkFor(EvidenceItem item);
+
+	/**
+	 * Every lead this user can see, for {@code UpcomingActivityWorker} (Phase 9) to scan for
+	 * activities starting soon.
+	 *
+	 * <p>A default of empty rather than an abstract method: enumerating "all leads" is not part
+	 * of the core briefing contract (G.1's interface is about one lead at a time), and requiring
+	 * every adapter to implement it would force a CRM with no bulk-listing API into one. An
+	 * adapter that cannot support scheduled pre-warming simply opts out; the worker skips it.
+	 */
+	default List<LeadRef> listActiveLeads(ActingUser user) {
+		return List.of();
+	}
+
+	/**
+	 * Which users {@code UpcomingActivityWorker} should act as when scanning this CRM.
+	 *
+	 * <p>A background job has no human session to derive identity from, and every adapter method
+	 * requires an {@link ActingUser} by design (C4) - so something has to say who the worker acts
+	 * as. Real deployments would resolve this from a service-account registry per tenant; that
+	 * registry does not exist yet (Appendix 2), so the default is empty and an adapter opts in
+	 * only once it knows what identity is safe to use.
+	 */
+	default List<ActingUser> serviceIdentities() {
+		return List.of();
+	}
 }

@@ -242,14 +242,16 @@ public final class DeterministicProjector {
 		return text.length() <= 140 ? text : text.substring(0, 137) + "...";
 	}
 
-	private static List<SourceRef> sourcesFor(BriefingContext context, AtomicFact fact) {
+	/** Package-visible: {@link InferentialProjector} resolves sources for its facts the same way. */
+	static List<SourceRef> sourcesFor(BriefingContext context, AtomicFact fact) {
 		return context.evidence().stream()
 				.filter(item -> item.getId().equals(fact.getEvidenceId()))
 				.map(MissingInfoRules::toSource)
 				.toList();
 	}
 
-	private static String label(FactKind kind) {
+	/** Package-visible: {@link InferentialProjector} reuses this for the same fact kinds. */
+	static String label(FactKind kind) {
 		return switch (kind) {
 			case OBJECTION -> "Unresolved objection";
 			case COMMITMENT_AGENT -> "You promised";

@@ -16,6 +16,7 @@ spring:
   config:
     import:
       - optional:file:.env.demo[.properties]
+      - optional:file:.env.leadscrm[.properties]
       - optional:file:.env.leadrat[.properties]
       - optional:file:.env.generic-dom[.properties]
 

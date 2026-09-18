@@ -21,20 +21,24 @@ React side panel — reads the current lead, renders the briefing UI
 
 The core design principle: **the extension is not tightly coupled to any one CRM.** Everything CRM-specific lives behind a `CrmAdapter` interface (hostname matching + lead-ID extraction). Detecting a new CRM or a new way of finding a lead ID means adding an adapter file and registering it — the content script, background worker, storage layer, and UI never need to change.
 
-There is no real backend integration yet. A Spring Boot skeleton exists (see below) but currently has no endpoints — CRM/lead data is just logged to the console for now, by design (see "Current status").
+**The extension and the backend are not wired together yet.** The backend (`backend/leadlens/`) is not a skeleton - it implements the full extraction → grounding → composition pipeline described in `IMPLEMENTATION_PLAN.md` (Phases 0-9) against the `CrmAdapter` interface - but the extension currently never calls it; CRM/lead data detected client-side is just logged to the console, and the panel always renders mock data (see "What's explicitly not implemented yet"). Connecting the two is the largest remaining piece of work.
 
 ## Project structure
 
 ```
-backend/leadlens/                        Spring Boot skeleton (no endpoints yet)
+backend/leadlens/                        Spring Boot 4 API - the briefing engine
   src/main/java/com/leadlens/
-    LeadlensApplication.java             Entry point; excludes datasource/JPA
-                                          autoconfig since no DB is configured
-    config/SecurityConfig.java           Permit-all + CORS, kept ready for when
-                                          real endpoints are added (spring-boot-
-                                          starter-security is on the classpath
-                                          and will lock down any new controller
-                                          by default otherwise)
+    evidence/, facts/                    EvidenceItem, AtomicFact - the data model
+    ai/                                  LlmClient against OpenRouter
+    briefing/                            Deterministic + inferential projectors,
+                                          FactSelector, GroundingPolicy, the
+                                          BriefingService orchestrator
+    run/                                 Async run API (POST /api/briefings -> 202)
+    crm/                                 CrmAdapter interface + registry; adapters
+                                          for a given CRM live under crm/<key>/
+    security/                            TokenAuthFilter (shared-token gate) + CORS
+    schedule/                            Pre-meeting scheduled generation worker
+  See IMPLEMENTATION_PLAN.md for the full architecture and phase-by-phase detail.
 
 frontend/leadlens/                       Chrome extension (React + TS + Vite, MV3)
   public/manifest.json                   Extension manifest
@@ -89,11 +93,12 @@ The actual briefing content (customer snapshot, objections, pending actions, etc
 
 ## What's explicitly not implemented yet
 
-- No real backend endpoints. There were dummy `/api/crm/context` and `/api/leads/brief` endpoints at one point; they were removed in favor of just logging to the console, since the backend wasn't ready to do anything real with the data yet.
-- No AI-generated briefing content — the briefing shown is 100% static mock data.
-- No authentication, anywhere.
+- **The extension never calls the backend.** The backend has real endpoints (`POST /api/briefings`, `GET /api/leads/{leadId}/report`, etc. - see `IMPLEMENTATION_PLAN.md` Part H) and a real pipeline behind them; nothing in `frontend/leadlens` calls any of it yet. Detected CRM/lead data is only logged to the console client-side.
+- No AI-generated briefing content **in the panel** — the briefing shown is 100% static mock data (`mock/leadBrief.ts`), independent of whether the backend could produce a real one.
+- No authentication end-to-end. The backend has a shared-token gate (`TokenAuthFilter`) ready to be sent by the extension; the extension doesn't send it yet.
 - No lead detection for LeadRat proper (`*.leadrat.com`) — only `leadrat-builder` works right now.
-- The `CrmAdapter` interface only supports the DOM-click strategy formally; the network-based strategy for `leadrat-builder` is currently hardcoded in `background.ts` rather than generalized as a per-adapter capability. Worth generalizing once a second network-based CRM shows up.
+- No `CrmAdapter` (backend side) targets the actual demo CRM (`leads-crm-backend`/`leads-crm-frontend`) this project now uses - the extension's detectors are still hardcoded to real `leadrat.com`/`leadratd.com` domains instead.
+- The `CrmAdapter` interface (extension side) only supports the DOM-click strategy formally; the network-based strategy for `leadrat-builder` is currently hardcoded in `background.ts` rather than generalized as a per-adapter capability. Worth generalizing once a second network-based CRM shows up.
 
 ## Running it
 
@@ -104,7 +109,7 @@ npm run dev:extension      # watches and rebuilds into build/
 ```
 Then in `chrome://extensions`: enable Developer Mode → "Load unpacked" → select `frontend/leadlens/build`.
 
-**Backend (currently just a skeleton, nothing calls it):**
+**Backend (the extension doesn't call it yet, but it's a real API - see "Configuration and secrets" below for required env vars):**
 ```
 cd backend/leadlens
 ./mvnw spring-boot:run
@@ -122,3 +127,69 @@ Must be served over `http://localhost/…` or `http://127.0.0.1/…` — the con
 - **`chrome.storage.session` is cleared every time the extension is reloaded** in `chrome://extensions`. When testing lead detection, reload the extension *before* clicking a lead, not after — otherwise you'll be looking at stale/empty storage.
 - **Chrome's per-site "site access" permission toggle can silently block `chrome.webRequest`**, even when `host_permissions` in the manifest correctly lists the domain. This cost significant debugging time: the extension's site-access list (visible via the puzzle-piece icon → extension → "This can read and change site data") had every listed site toggled off despite the manifest being correct. `host_permissions` is currently set to `["<all_urls>"]` as a result — broader than strictly necessary, kept that way because narrowing it back down wasn't reliably reproducible during testing. Worth revisiting if this becomes more than a hackathon project.
 - **MV3 service workers terminate after ~30s idle** and their devtools console history doesn't survive that. If you're debugging background script behavior, don't trust "no console output" — persist anything important to `chrome.storage.session` instead of relying on `console.log` alone.
+
+## Tests
+
+```bash
+make verify
+```
+
+Unit tests (`*Test`) run under surefire; integration tests (`*IT`) run under failsafe during
+`verify`. Integration tests use a real Postgres started by Testcontainers, because the schema
+is Hibernate-generated and an in-memory database would validate against the wrong dialect.
+
+**Two conditions make integration tests skip rather than fail**, so a developer is never
+blocked by their machine:
+
+| Condition | Effect |
+|---|---|
+| No Docker daemon | Everything needing a database skips |
+| `Selector.open()` fails | Everything needing an embedded web server skips |
+
+CI does not get that option. It sets `LEADLENS_REQUIRE_DOCKER=true`, which turns both skips
+into build failures (`DockerRequiredInCiTest`). **A green local build that skipped everything
+is not a passing build** — check the skip count before trusting it.
+
+### Known issue: `Unable to establish loopback connection`
+
+On some Windows machines `Selector.open()` fails with this error. Plain loopback sockets
+still work, so it looks like networking is fine — but Tomcat's connector and the JDK's
+`HttpClient` both need a selector, so **the app cannot start and Docker Desktop often won't
+either**. It is usually local security software breaking the authenticated loopback socket
+pair that selector creation performs.
+
+Reproduce it in isolation:
+
+```bash
+java -e 'try (var s = java.nio.channels.Selector.open()) { System.out.println("OK"); }'
+```
+
+Worth trying, in order: restart Docker Desktop, `netsh winsock reset` from an admin prompt
+followed by a reboot, then check antivirus/EDR loopback filtering. Until it is fixed, the
+backend cannot be run locally on that machine; the unit suite and CI still cover the code.
+
+## Configuration and secrets
+
+Never committed. `.gitignore` excludes `.env*`.
+
+- **Per-CRM config** lives in one file per adapter: `backend/leadlens/.env.demo`,
+  `.env.leadrat`, and so on, namespaced under `leadlens.crm.<crmKey>.*`. An adapter reads
+  only its own prefix. Adding a CRM is one adapter class plus one env file — no shared
+  config to edit. See plan §G.7.
+- **The LLM key** (`OPENROUTER_API_KEY`) is a single cross-cutting secret, supplied as an
+  environment variable. It is backend-only and must never reach `frontend/` — an extension
+  bundle is public.
+- **`LEADLENS_API_TOKEN`** gates `/api/briefings/**` and `/api/crm/**` behind a shared bearer
+  token (`TokenAuthFilter`, Phase 8). Leave it unset for local development — every request is
+  accepted and a warning is logged once. Set it before deploying anywhere reachable off
+  localhost; the extension's background service worker sends it as `Authorization: Bearer
+  <token>` alongside the identity headers.
+
+## Where to start reading
+
+| If you want | Read |
+|---|---|
+| Why the architecture is shaped this way | Plan Parts B, D, F |
+| What to build next | Plan Part K (phases), K.2 (checklist coverage) |
+| The data model | Plan Part E |
+| How a new CRM gets added | Plan Part G |

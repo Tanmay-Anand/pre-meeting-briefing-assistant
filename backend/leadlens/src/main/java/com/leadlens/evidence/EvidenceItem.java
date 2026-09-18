@@ -121,6 +121,20 @@ public class EvidenceItem {
 	@Column(name = "updated_at", nullable = false)
 	private Instant updatedAt;
 
+	/**
+	 * The extractor version that has run on this item, or null if none has.
+	 *
+	 * <p>Exists solely to make the extraction cache correct. {@code FactRepository}'s cache
+	 * lookup is "facts with this evidenceId and extractorVersion" - which is indistinguishable
+	 * between "never extracted" and "extracted, and genuinely produced nothing" when the result
+	 * is an empty list. A quiet call that yields zero facts would otherwise be re-sent to the
+	 * model on every single generation forever, silently breaking the "adding one activity costs
+	 * exactly one extraction call" guarantee (F.4). This field is what makes zero a cacheable
+	 * answer.
+	 */
+	@Column(name = "facts_extracted_version", length = 32)
+	private String factsExtractedVersion;
+
 	/** True when this record carries no readable content - see {@link #text}. */
 	public boolean hasNoText() {
 		return text == null || text.isBlank();

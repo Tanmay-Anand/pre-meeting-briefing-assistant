@@ -7,6 +7,9 @@ import type { CrmType } from '../../types/crm'
  */
 export interface CrmAdapter {
   id: CrmType
-  matchesHost(hostname: string): boolean
+  // port is '' when the URL has none (e.g. a production CRM on the default https port).
+  // Adapters that match on a fixed hostname can ignore it; leadscrm.ts needs it since its
+  // dev server has no fixed domain, only a local port.
+  matchesHost(hostname: string, port: string): boolean
   extractLeadId(element: Element): string | null
 }

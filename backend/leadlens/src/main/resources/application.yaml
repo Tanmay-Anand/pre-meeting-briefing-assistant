@@ -19,6 +19,22 @@ spring:
     virtual:
       enabled: true
 
+# Phase 3/4 (F.15). Both roles point at the same testing config for now - deliberately not
+# final, see IMPLEMENTATION_PLAN.md Appendix 2 Q8. The key comes from the environment only,
+# never committed (I.4).
+leadlens:
+  ai:
+    base-url: ${OPENROUTER_BASE_URL:https://openrouter.ai/api/v1}
+    api-key: ${OPENROUTER_API_KEY:}
+    extractor:
+      model: ${LEADLENS_EXTRACTOR_MODEL:google/gemma-4-26b-a4b}
+    composer:
+      model: ${LEADLENS_COMPOSER_MODEL:google/gemma-4-26b-a4b}
+  # Phase 8. Empty means every request to /api/briefings and /api/crm is accepted
+  # unauthenticated - fine for local development, a startup warning either way (TokenAuthFilter).
+  security:
+    api-token: ${LEADLENS_API_TOKEN:}
+
 management:
   endpoints:
     web:

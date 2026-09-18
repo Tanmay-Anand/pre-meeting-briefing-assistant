@@ -8,9 +8,14 @@
 > this repository. A developer or coding agent should be able to work phase by phase from
 > this document alone.
 >
-> **Status:** Phases 0, 1 and 2 implemented (2026-09-17). Phase 3 is next and needs an
-> `OPENROUTER_API_KEY` before it can start. See [Build log](#build-log) for what landed, what
-> deviated from this plan and why.
+> **Status:** `[UPDATED 2026-09-18, verified live]` Phases 0–5, 7 (backend), 8 and 9
+> implemented, and — new today — **actually booted end-to-end against a real Postgres for the
+> first time and proven to generate a real, grounded briefing**, extension included: click a
+> lead in the browser, watch a real `POST /api/briefings` round trip, see the ten-section
+> document render in the side panel. Two genuine bugs surfaced by that first real boot are
+> fixed (see the build log). A third CRM adapter (`leadscrm`, beyond the plan's original Demo
+> CRM / Leadrat pair) is fully built; its live path is blocked on a Cognito auth-flow mismatch,
+> tracked as a priority TODO below. See [Build log](#build-log) for the full account.
 
 ---
 
@@ -18,6 +23,114 @@
 
 `[UPDATED 2026-09-17]` What is actually in the repository, so a developer picking this up
 knows where the plan ends and the code begins.
+
+## 2026-09-18 update — done / out of scope now / remaining
+
+`[ADDED 2026-09-18]` Everything below landed after the 2026-09-17 snapshot: PR#2
+(`feat/leadbrief-extension`) merged to `main`, `phase3-9-backend` reconciled against it, and a
+**third CRM adapter** (`leadscrm`, backed by the separate `leads-crm-backend`/
+`leads-crm-frontend` demo-CRM repos) built end-to-end, including reusing `sales-sdk`'s
+meeting-transcript capability as an evidence source rather than duplicating it. This section
+is a snapshot for planning purposes — the per-phase detail lives in Part K as before, and this
+entry does not repeat it.
+
+### Done
+
+| Item | Evidence |
+|---|---|
+| PR#2 (`feat/leadbrief-extension`) fixed and merged to `main` | Duplicate `SecurityFilterChain` bean and frontend CI path issues resolved; merge commit `24a529c` |
+| `phase3-9-backend` reconciled with `main` | Stashed, merged, resolved `SecurityConfig.java` (kept both CORS config and `TokenAuthFilter`) and `README.md` (kept the accurate backend description) conflicts; full suite green after |
+| `LeadsCrmAdapter` — a real, full `CrmAdapter` for `leads-crm-backend` | `backend/leadlens/src/main/java/com/leadlens/crm/leadscrm/` — `LeadsCrmAdapter`, `LeadsCrmProperties`, `LeadsCrmDtos`, `CognitoServiceAuthClient` (direct Cognito `InitiateAuth`, no AWS SDK), `AiSdkMeetingClient`. `CRM_KEY = "leadscrm"` |
+| Meeting-transcript evidence, reusing `sales-sdk` rather than rebuilding it | `AiSdkMeetingClient.fetchDiscussions` calls `leads-crm-backend`'s `GET /ai-sdk/meetings/discussions?leadId=` (via `sales-sdk`'s embedded `ai-sdk` module) and maps each `DiscussionResponse` to an `EvidenceItem` (`EvidenceType.MEETING`, new `Channel.VIDEO_CALL`, `Actor.SYSTEM`). All failures caught and logged, never thrown — meetings stay a supplementary source that can never break the primary CRM read |
+| Honest field mapping instead of guessed ones | `LeadsCrmAdapter.fetchLead()` leaves `bhk`/`location`/`budget` as `FieldValue.absent()` — this CRM's `Lead` entity has no matching fields (`propertyCategory` is RESIDENTIAL/COMMERCIAL/PLOT/AGRICULTURE, not BHK-shaped) — rather than guessing and silently breaking F.16's contradiction detection |
+| `resolveLead()` correctly returns `Optional.empty()` | Confirmed by code inspection that `leads-crm-frontend` has no per-lead URL (`selectedLead` is a `useState`, not a route) — identity must come from DOM click detection instead, per G.2/ledger #4's URL-first rule degrading honestly when the CRM itself has no URL identity |
+| Extension-side lead click detection for `leadscrm` | `frontend/leadlens/src/content/crm/leadscrm.ts` + registration in `detector.ts`; `leads-crm-frontend`'s shared `DataTable` gained an optional `getRowDataAttributes` prop, wired in `leads-table.tsx` to stamp `data-lead-id`/`data-ai-sdk-entity`/`data-ai-sdk-id` on each row — reusing the same attribute convention `sales-sdk`'s own widget expects, so neither consumer needs to know about the other |
+| `sales-sdk` CI dependency resolution fixed | `leads-crm-backend/pom.xml` — JitPack (`com.github.anshikleadrat:sales-sdk:<commit-sha>`) replacing the GitHub-Packages coordinate that 401'd in CI (GitHub Packages requires auth for all Maven requests regardless of visibility — a hard platform rule, not a misconfiguration). Verified: `mvn dependency:resolve` and `mvn compile` both succeed locally. **Not yet pushed** — see Remaining |
+| Both frontends build clean | `leads-crm-frontend` (`tsc -b && vite build`) and `frontend/leadlens` (extension) both typecheck, build and lint clean after the above changes |
+
+## 2026-09-18 (continued) — live verification, two real bugs fixed, one priority TODO
+
+`[ADDED 2026-09-18]` Everything in the table above was built and unit-tested but never actually
+run end-to-end against a live Postgres — every prior check was either a plain compile, a unit
+test, or a Docker-less environment. This round did that for the first time: started both
+Postgres containers, both backends, `leads-crm-frontend`, and the built extension for real, and
+drove a real lead click through to a rendered briefing. That surfaced two genuine bugs, now
+fixed, and one genuine blocker, now documented rather than silently skipped.
+
+### Done
+
+| Item | Evidence |
+|---|---|
+| Extension wired to the real backend | `[SUPERSEDES the "Wire the extension's App.tsx" Remaining item above — now done]` `background/backendClient.ts` does the full `POST /api/briefings` → poll `GET /api/briefings/run/{id}` → `GET /api/briefings/{id}` round trip; `App.tsx`'s `SHOW_MOCK_DATA` flipped to `false`; `lib/mapBriefing.ts` projects the real 10-section document onto the existing UI without a redesign. Verified live: clicking Rahul Sharma in the `mock-crm` test page renders a real generated briefing in the side panel, screenshotted and confirmed |
+| `demo` CRM adapter added to the extension | `content/crm/demo.ts` + `mock-crm/index.html` served on a fixed port (8085) — the only way to click-test against the backend's richest fixture (objections, contradictions, Hinglish) since `frontend/demo-crm/` (Part G.4) was never built |
+| `GET /api/briefings/upcoming` + panel surface | `BriefingController.upcoming()` (backend) + `UpcomingMeetingBanner.tsx` (extension) — closes MVP checklist item 3 visibly rather than only inside the scheduler |
+| **Bug fix: backend couldn't boot at all** | `LeadlensApplication.java` still excluded `DataSourceAutoConfiguration`/`HibernateJpaAutoConfiguration` — a Phase 0 placeholder ("remove once a real datasource is configured") nobody removed once Phase 1 built the entire JPA persistence layer. Every repository bean (`EvidenceRepository` etc.) failed to construct; the app never started against a real datasource until this session, because nothing before this had tried |
+| **Bug fix: same-thread deadlock on every lead's first-ever generation** | `BriefingService.ensureExtractedContext`/`generateFull` were `@Transactional`, self-invoking `buildContext` (which persists newly-synced `EvidenceItem` rows) and then looping into `FactExtractor.ensureExtracted`'s own `REQUIRES_NEW` per-item transaction (F.5). The outer transaction never committed until the whole method returned, so the inner `REQUIRES_NEW` insert blocked forever on the outer's still-uncommitted row — a real Postgres `transactionid` lock wait with no timeout, confirmed via `jcmd Thread.dump_to_file` (Java 25 virtual threads don't show in a plain `jstack`) and `pg_stat_activity`. Fixed by removing `@Transactional` from both methods so each step commits on its own — this is what F.5's per-item design already assumed, the outer annotation just silently defeated it. Would have hung **every** cold "Prepare Me" click, indefinitely, with zero error — found only because this was the first real boot |
+| **Bug fix: side panel silently refused to open** | `background.ts`'s `LEAD_CLICKED`/network-detected handlers called `chrome.sidePanel.open()` inside a `.then()` after an awaited `setCurrentLead()` — Chrome only honors the API within the same synchronous turn as the triggering event, and the delay lost that window. Confirmed via the extension's own Errors panel: `sidePanel.open() may only be called in response to a user gesture`. Fixed by calling it as the first synchronous statement in each handler, with the storage write moved after (unaffected by the ordering) |
+| `leads-crm-backend`'s `ai-sdk` setup completed | Found the auto-generated setup OTP in its own startup log, exchanged it via `POST /ai-sdk/setup` for a real admin password, stored in `.env.leadscrm`'s `ai-sdk-admin-password` |
+| Two self-issued secrets rotated (from item 4 of the ordered list) | `AI_SDK_JWT_SECRET`, `AI_SDK_MEETING_GOOGLE_TOKEN_ENCRYPTION_KEY` in `leads-crm-backend/.env` — regenerated directly since both are self-issued, no external account needed |
+| ArchUnit boundary test | `ArchitectureTest.java` — makes "briefing/facts/evidence never import a concrete CRM adapter" (Part J) a real, running, passing test instead of a review-time convention |
+| 40 new unit tests across 7 previously-untested classes | `FactExtractorTest` (3), `InferentialProjectorTest` (5), `TalkingPointsComposerTest` (5), `BriefingDiffServiceTest` (6), `TokenAuthFilterTest` (8), `UpcomingActivityWorkerTest` (5), `LeadsCrmAdapterTest` (8, scope narrowed to `resolveLead()`/field-mapping — network-touching methods not covered, disclosed). Full unit suite: 107 tests, 0 failures, run together (not just individually) to rule out cross-file conflicts |
+| `Makefile` fixed | `FRONTEND_DIR` pointed at a nonexistent `frontend/` (extension actually lives at `frontend/leadlens/`); `demo-crm:*` targets referenced npm scripts that were never created. Both stale from before PR#2's restructuring |
+
+### Priority TODO — `leadscrm` live path blocked on a Cognito auth-flow mismatch
+
+`[ADDED 2026-09-18]` `CognitoServiceAuthClient` calls Cognito's `InitiateAuth` with
+`AuthFlow: USER_PASSWORD_AUTH`. The actual `leads-crm-backend` Cognito app client only allows
+**SRP** (`scripts/provision-cognito.sh` provisions "a public app client with SRP and no
+secret") — confirmed directly: an `InitiateAuth` call with real credentials returns
+`InvalidParameterException: USER_PASSWORD_AUTH flow not enabled for this client`. This blocks
+every `LeadsCrmAdapter` call that needs a service token (`fetchLead`, `fetchEvidence`,
+`fetchUpcoming`, `listActiveLeads`) — confirmed separately that `listActiveLeads` currently
+throws a `NullPointerException` from the scheduler with `service-username`/`service-password`
+unset, which `UpcomingActivityWorker`'s `safely()` wrapper catches without crashing the app.
+
+**Decision (2026-09-18):** deferred, not fixed, because the `demo` CRM path already proves
+everything the hackathon brief actually requires (grounded ten-section briefing, real
+citations, graceful degradation) end-to-end and live. Getting `leadscrm` live-clickable through
+`leads-crm-frontend` is additional CRM-agnostic credibility, not something the core demo
+depends on.
+
+**When picked back up, two options, not yet chosen:**
+1. Enable `ALLOW_USER_PASSWORD_AUTH` on the Cognito app client (AWS Console → Cognito → User
+   pools → App clients → Edit → check the box). A ~2-minute change, doesn't disable SRP for any
+   other client, easily reversible — but needs someone with working AWS access to this specific
+   account (this session's AWS CLI identity resolved to an unrelated account; the
+   project-specific profile's SSO session had expired and needed interactive re-auth neither
+   available nor appropriate to do unattended).
+2. Implement SRP properly in `CognitoServiceAuthClient` — more correct long-term, but real
+   cryptographic work (modular exponentiation, HKDF key derivation, AWS's exact timestamp/
+   signature format) with no AWS SDK in play by design (G.2's "no AWS SDK" choice was made for
+   the simpler flow; SRP without SDK support is a materially bigger lift).
+
+### Out of scope now
+
+Decisions made this round, stated so they read as decisions rather than gaps:
+
+| Item | Why |
+|---|---|
+| `leads-crm-frontend` does not get its own per-lead URL/route added | Would require changing a repo that isn't this team's primary deliverable, purely to satisfy `LeadsCrmAdapter.resolveLead()`. DOM click detection (already built) gets the same result without touching that repo's routing |
+| No real per-user auth for the `leadscrm` adapter | `LeadsCrmAdapter` authenticates as a single Cognito service identity against `leads-crm-backend`'s API, same time-boxed simplification Phase 8 already accepted for the main backend (`TokenAuthFilter`'s shared-secret model, not per-user). Appendix 2 Q5-equivalent for this adapter: genuinely unresolved, not a priority for a second adapter when the first one already ships this trade-off |
+| Duplicating `sales-sdk`'s own query/chat UI inside LeadLens | Confirmed this round (see the Path A/Path B discussion) — `sales-sdk` already has a working meetings+query surface; LeadLens integrates its meeting data as one more evidence source instead of rebuilding a parallel chat/query feature. Keeps the ten-section structured briefing (§A.3, the brief's actual requirement) as the one deliverable, rather than splitting effort across two UIs |
+| `LeadratAdapter` beyond its Phase 10 stub | Unchanged from the 2026-09-17 plan (still Part K Phase 10 item 6) — building a third *real* adapter (`leadscrm`) this round already demonstrates the CRM-agnostic claim without needing Leadrat access, RBAC test-tenant setup, or the still-open Appendix 2 Q2/Q5 |
+
+### Remaining
+
+`[UPDATED 2026-09-18]` Several items from the original list are now done — struck through
+rather than deleted, so the history of what changed stays visible.
+
+| Item | Notes |
+|---|---|
+| ~~Wire the extension's `App.tsx` to the live backend~~ | **Done** — see the live-verification section above |
+| ~~Dedicated unit tests for the seven Phase 3/5/8/9/`leadscrm` classes~~ | **Done** — 40 tests added, see above |
+| **`leadscrm` live path blocked on Cognito SRP mismatch** | **Priority TODO** — see the dedicated section above, not just a line item |
+| Decide how to push the `leads-crm-backend` JitPack `pom.xml` fix | Direct to `main` triggers a live EC2 deploy (`deploy-main.yml`); via a branch/PR first is the safer default. Asked, not yet answered |
+| Commit and push the accumulated `phase3-9-backend` work | Everything in both Done tables above — including `LeadsCrmAdapter`, the two bug fixes, and the new tests — is still sitting uncommitted on local `phase3-9-backend`, deliberately, per instruction |
+| Phase 7.5 — PDF + email report export | Not started; see Part K's Phase 7.5 section, unchanged since 2026-09-17 |
+| Phase 6 frontend steps 5–9 (full section renderers with provenance badges, source drawer, §0/journey as dedicated panel views, DOM fallback) | The current panel already renders real data (via `lib/mapBriefing.ts`'s projection onto the existing simpler UI) — this item is now about the richer Part I.2 panel design specifically, not "make it real" |
+| Rotate the OpenRouter / Google OAuth / Recall.ai secrets pasted into chat earlier this session | Flagged as a live exposure when it happened (Appendix 2 Q8a already tracks the single-OpenRouter-account risk; this is the same class of risk, now doubled by having been typed into a chat transcript) — not yet actioned. (The two *self-issued* secrets in the same file were rotated this round — see above — these four external ones still need a dashboard visit) |
+| Compliance review: real `leadrat.com`/`leadratd.com` domains hardcoded in the public repo, and whether `leads-crm-backend`/`leads-crm-frontend` being "adapted from" real Leadrat production code violates hackathon submission rules | Raised earlier this session, never resolved either way — worth a decision before submission, not a code change by itself |
+| `LEADLENS_API_TOKEN` for any deployment beyond localhost | Documented gap in Phase 8's `[DONE]` note; only matters once something is actually deployed |
 
 ## Completed
 
@@ -496,6 +609,13 @@ ship something true.
 
 ## D.3 Pipeline
 
+`[CONFIRMED 2026-09-18]` A separate teammate walkthrough of the same problem independently
+landed on the identical rule, stated more sharply: *think in triggers, not "meeting" - opening
+a lead in the CRM must never by itself produce a brief, because this is a pre-meeting brief and
+something has to actually ask for it.* Below is exactly that: two triggers produce a document
+(`manual`, `scheduled`); `reactive` only ever invalidates/extracts, never composes one on its
+own (F.16, E.8).
+
 ```
 Trigger
   manual      (agent clicks Prepare Me)
@@ -622,7 +742,9 @@ EvidenceItem {
   occurredAt    Instant
   actor         Enum      // AGENT | CUSTOMER | SYSTEM
   actorId       String?
-  channel       Enum      // PHONE | WHATSAPP | EMAIL | CRM | IN_PERSON
+  channel       Enum      // PHONE | WHATSAPP | EMAIL | CRM | IN_PERSON | VIDEO_CALL
+                          //   (VIDEO_CALL added 2026-09-18 for LeadsCrmAdapter's
+                          //   meeting-transcript evidence — distinct from PHONE)
   text          String?   // normalised content; NULL is meaningful — see E.5
   structured    Json      // type-specific payload (propertyId, oldStatus/newStatus, dueAt…)
   deepLink      String    // CRM URL for §10
@@ -759,14 +881,14 @@ note). See F.16 for how "contradicted" is detected and why it must be symmetric.
 `backend/leadlens/src/main/java/com/leadlens/`, grouped by package per Part J.
 
 ```
-leads_cache          -- optional: adapter-fetched lead fields, tenant-scoped
+leads                -- E.8, ADDED 2026-09-18: the registry, internal id, tenant-scoped
 evidence_items       -- E.1; immutable except updatedAt
 briefing_facts       -- E.2 AtomicFact rows. NOT per-briefing.
-briefings            -- id, tenantId, leadId, activityId?, generatedFor (userId),
-                        evidenceFingerprint, status, model, promptVersion,
-                        createdAt, supersededBy
+briefings            -- id, leadId, tenantId, crmKey, leadRef, activityId?,
+                        generatedFor (userId), evidenceFingerprint, status, model,
+                        promptVersion, createdAt, supersededBy
 briefing_sections    -- briefingId, sectionKey, renderState, orderedFactIds[]
-briefing_runs        -- runId, briefingId?, status, steps (jsonb), startedAt, elapsedMs
+briefing_runs        -- runId, leadId, briefingId?, status, steps (jsonb), startedAt, elapsedMs
 briefing_feedback    -- briefingId, userId, factId?, verdict, comment   (optional scope)
 ```
 
@@ -774,6 +896,57 @@ briefing_feedback    -- briefingId, userId, factId?, verdict, comment   (optiona
 generated for it. This is what makes C5 (incremental refresh) work.
 
 `briefing_runs` lives in Postgres, not an in-process map — see 0.3 and Appendix 1.
+
+## E.8 Lead registry `[ADDED 2026-09-18]`
+
+A teammate's separate walkthrough of the same problem (Rakshit + guests, transcript
+2026-09-18) converged independently on several of this plan's own decisions — a demo CRM the
+extension controls, per-fact provenance, a report keyed by an internal id rather than the raw
+CRM reference. Where it added something new: **the report should be keyed by "your service's
+own internal lead id," not by `(crmKey, leadRef)` directly**, and a lead should be a first-class
+thing that "gets registered" with LeadLens rather than existing only implicitly as a foreign
+key scattered across `evidence_items`, `briefing_facts` and `briefings`.
+
+```
+Lead {
+  id             UUID       // the internal id everything downstream is keyed by
+  tenantId       String
+  crmKey         String
+  leadRef        String     // the CRM's own id for this lead
+  displayName    String?    // snapshotted from the CRM at registration, refreshed lazily
+  assignedUserId String?
+  registeredAt   Instant
+  lastSyncedAt   Instant?
+}
+-- unique(tenantId, crmKey, leadRef)
+```
+
+**Why add a table rather than keep `(tenantId, crmKey, leadRef)` as the natural key
+everywhere**, which is what Phases 1–9 shipped with: that triple is correct as an identity, but
+repeating it as the join key on every table (`evidence_items`, `briefing_facts`, `briefings`,
+`briefing_runs`) means every query that needs "this lead's stuff" carries three columns instead
+of one, and there is nowhere for lead-level metadata (a cached display name, when it was first
+seen) to live. `Lead.id` is that place, and it is what the report API is keyed by from here on.
+
+**Registration is additive, not a breaking migration.** `evidence_items` and `briefing_facts`
+keep `(tenantId, crmKey, leadRef)` as-is — extraction and evidence sync are CRM-sync mechanics,
+not report identity, and touching every repository method that already works and is tested
+was not worth the risk this close to a deadline. Only `Briefing` and `BriefingRun` gain a
+`leadId` column, since those are the two entities the report API actually returns.
+
+**Registration is auto-upsert, not a hard precondition, by design choice.** `POST
+/api/briefings` (and the new report endpoint below) register the lead on first contact if it
+is not already registered, rather than requiring a separate `POST /api/leads` call before
+generation can happen at all. This still satisfies "leads get registered with it" - they
+genuinely are, every time - without forcing the extension to sequence two round trips before a
+human sees anything. A strict pre-registration requirement is a one-line change
+(`leads.require(...)` instead of `leads.registerIfAbsent(...)`) if the team decides the demo
+should show registration as its own explicit step.
+
+**This does not change the "no auto-fire on open" answer.** Registration and extraction are
+both allowed to happen passively (confirmed 2026-09-18); only full brief *generation*
+(`BriefingService.generateFull`, the composed document) is trigger-gated, and registering a
+lead is closer to "the system now knows this lead exists" than to "a brief was produced."
 
 ---
 
@@ -1122,6 +1295,16 @@ leave `normalizedValue` null rather than guess (same discipline as C2) — a nul
 fixture needs a case that exercises this independent of the existing WhatsApp-budget example
 (see Phase 1, step 6).
 
+**`[CONFIRMED 2026-09-18]`** A separate teammate walkthrough independently arrived at a
+stricter reading of triggers - "a brief must not fire just from opening a lead page" - which
+raised the question of whether this section's eager extraction-on-open contradicts that rule.
+Reviewed and confirmed it does not: the trigger rule governs full brief *generation*
+(`BriefingService.generateFull`, the composed document with §3-§8), not the extraction step
+alone. Extraction is per-item, cached, and produces no document - calling
+`ensureExtractedContext` on every `/latest`/`/report` read is the same category of action as
+reading a database index, not "producing a brief." Only an explicit trigger (manual call or a
+scheduled activity, Phase 9) ever calls `generateFull`.
+
 ---
 
 # Part G — CRM adapter layer
@@ -1147,15 +1330,24 @@ work with?" and it is the architecture slide.
               │ EvidenceItem[]   │   ← the Common CRM Model (E.1)
               └────────┬─────────┘
                        │
-         ┌─────────────┼─────────────┬──────────────┐
-         │             │             │              │
-  ┌──────▼─────┐ ┌─────▼──────┐ ┌────▼──────┐ ┌────▼────────┐
-  │ DemoCrm    │ │ Leadrat    │ │ GenericDom│ │ UserSelection│
-  │ Adapter    │ │ Adapter    │ │ Adapter   │ │ Adapter      │
-  │ (BUILD)    │ │ (stub)     │ │ (partial) │ │ (build, thin)│
-  └────────────┘ └────────────┘ └───────────┘ └──────────────┘
-      CRM API        CRM API        DOM text      Highlighted text
+         ┌─────────────┼─────────────┬──────────────┬─────────────┐
+         │             │             │              │             │
+  ┌──────▼─────┐ ┌─────▼──────┐ ┌────▼──────┐ ┌────▼────────┐ ┌──▼─────────┐
+  │ DemoCrm    │ │ Leadrat    │ │ GenericDom│ │ UserSelection│ │ LeadsCrm   │
+  │ Adapter    │ │ Adapter    │ │ Adapter   │ │ Adapter      │ │ Adapter    │
+  │ (BUILT)    │ │ (stub)     │ │ (partial) │ │ (build, thin)│ │ (BUILT,    │
+  └────────────┘ └────────────┘ └───────────┘ └──────────────┘ │ 2026-09-18)│
+      CRM API        CRM API        DOM text      Highlighted   └────────────┘
+                                                    text             CRM API +
+                                                                 meeting evidence
 ```
+
+`[ADDED 2026-09-18]` `LeadsCrmAdapter` (`crmKey = "leadscrm"`) is a fourth real adapter — not
+in this part's original plan, since it targets a second, separately-repo'd demo CRM
+(`leads-crm-backend`/`leads-crm-frontend`) rather than the in-repo Demo CRM or Leadrat. It also
+pulls evidence from a second upstream system (`sales-sdk`'s meeting-transcript API) alongside
+the CRM's own notes — the first adapter in this build that merges more than one evidence
+source. See the 2026-09-18 Build log entry above for what it does and does not cover.
 
 **The claim to judges:** *"The AI engine has no CRM-specific code. Supporting a new CRM is
 one adapter class and one URL pattern; the extraction, grounding and briefing logic do not
@@ -1194,7 +1386,7 @@ implementations, ranked by trust.
 
 | Mode | Adapter | `sourceMode` | Status in this build | Trust rules |
 |---|---|---|---|---|
-| **1. CRM API** | `DemoCrmAdapter`, `LeadratAdapter` | `CRM_API` | **Demo: fully built.** Leadrat: stub through Phase 9; graduates to a real multi-call adapter (G.2 note) in Phase 10 item 6, now that RBAC, webhook and no-new-endpoint are confirmed (Appendix 2) | Full. May populate §1, may be cited in §10 with a working deep link |
+| **1. CRM API** | `DemoCrmAdapter`, `LeadratAdapter`, `LeadsCrmAdapter` | `CRM_API` | **Demo: fully built. `LeadsCrmAdapter`: fully built `[ADDED 2026-09-18]`**, including merged meeting-transcript evidence (G.1). Leadrat: stub through Phase 9; graduates to a real multi-call adapter (G.2 note) in Phase 10 item 6, now that RBAC, webhook and no-new-endpoint are confirmed (Appendix 2) | Full. May populate §1, may be cited in §10 with a working deep link. `LeadsCrmAdapter` is the one exception on §1: `bhk`/`location`/`budget` stay `FieldValue.absent()` since this CRM's schema has no matching fields — see the 2026-09-18 Build log entry |
 | **2. DOM extraction** | `GenericDomAdapter` | `DOM_SCRAPE` | Partial: selector-config driven, one demo profile | May produce evidence and facts. **May not** populate §1 authoritatively; renders with a "read from page" badge; §10 links to the page, not a record |
 | **3. User selection** | `UserSelectionAdapter` | `USER_SUPPLIED` | Built (thin — it is a POST body) | Same constraints as DOM, plus the panel states plainly that the agent supplied this text |
 
@@ -1281,6 +1473,8 @@ own env file rather than sharing one global `.env`:
 backend/leadlens/
 ├── .env.demo          # DemoCrmAdapter    — base URL, service credentials for the Demo CRM API
 ├── .env.leadrat       # LeadratAdapter    — base URL, API key/OAuth client, tenant-mapping
+├── .env.leadscrm      # LeadsCrmAdapter   — base URL, Cognito service creds, tenant id,
+│                      #   ai-sdk admin password for meeting evidence  [ADDED 2026-09-18]
 ├── .env.generic-dom   # GenericDomAdapter — none required today; reserved for future auth needs
 └── .env.<crmKey>      # one file per adapter added later
 ```
@@ -1318,12 +1512,19 @@ the reminder worker are all thin clients over the same contract.
 
 ## H.1 Briefing endpoints
 
+`[REVISED 2026-09-18]` A separate teammate walkthrough of the same problem landed on "the
+extension should be a thin consumer of one `GET latest report for lead X` call" — which our
+own split between `/latest` (metadata) and `/{id}` (content) didn't quite deliver. Merged below.
+
 | Method | Path | Notes |
 |---|---|---|
-| `POST` | `/api/briefings` | Body `{crmKey, leadRef, activityId?}`. Returns cached briefing if fingerprint matches, else `202 {runId}` |
-| `GET` | `/api/briefings/run/{runId}` | `{status, steps[], completedItems, totalItems, sections{}, elapsedMs}`. `202` while in flight (F.8) |
-| `GET` | `/api/briefings/{briefingId}` | Full document. `202` if not yet complete (F.9) |
-| `GET` | `/api/briefings/latest?crmKey=&leadRef=` | Latest briefing plus `{stale, newActivityCount, lastUpdatedAt, fieldContradictions[]}` — drives the freshness pill and the F.16 sync check. `fieldContradictions` is computed live from persisted facts + current `LeadSnapshot` on every call, independent of whether a full briefing run has completed — this is what surfaces a `Contradicted` field the moment the lead is opened, not only after Refresh |
+| `POST` | `/api/leads` | `[ADDED]` Body `{crmKey, leadRef}`. Registers (upserts) the lead and returns `{leadId, crmKey, leadRef, displayName, registeredAt}` — the internal id everything else is keyed by (E.8) |
+| `POST` | `/api/briefings` | Body `{crmKey, leadRef, activityId?}` **or** `{leadId}`. Auto-registers the lead if needed (E.8). Returns cached briefing if fingerprint matches, else `202 {runId}` |
+| `GET` | `/api/briefings/run/{runId}` | `{runId, status, briefingId, completedItems, totalItems, steps[], errorMessage}`. `202` while in flight (F.8) |
+| `GET` | `/api/briefings/{briefingId}` | One specific stored version. `202` if not yet complete (F.9). Kept for `/changes?since=`, which needs to name two exact versions |
+| `GET` | `/api/leads/{leadId}/report` | `[ADDED, REPLACES /api/briefings/latest]` The one call the panel needs: `{leadId, briefingId, status, stale, lastUpdatedAt, fieldContradictions[], sections[]}` — merges the old freshness/contradiction signal with the full rendered document in one response, matching "GET latest report for lead X → JSON" literally. Still a live, model-free computation (F.16) on every call |
+| `GET` | `/api/leads/{leadId}/report.pdf` | `[ADDED, bumped up from Phase 10 optional — 2026-09-18]` The same report, rendered as a PDF. See the new Phase 7.5 note below |
+| `POST` | `/api/leads/{leadId}/report/email` | `[ADDED, same bump]` Sends the current report PDF to the given agent's email. Body `{to}` — LeadLens does not yet have a verified email-per-user directory (Appendix 2, new question) |
 | `POST` | `/api/briefings/{id}/refresh` | Force regeneration; reuses cached extractions. Returns `202 {runId}` |
 | `GET` | `/api/briefings/{id}/changes?since={briefingId}` | Deterministic fact-set diff (D.5) — the What Changed panel |
 | `GET` | `/api/briefings/upcoming` | Scheduled activities in window with briefing readiness — drives the reminder worker |
@@ -1504,6 +1705,7 @@ backend/leadlens/src/main/java/com/leadlens/
 │   ├── model/        LeadRef, LeadSnapshot, ScheduledActivity
 │   ├── demo/         DemoCrmAdapter
 │   ├── leadrat/      LeadratAdapter          (stub)
+│   ├── leadscrm/     LeadsCrmAdapter         (built, 2026-09-18 — see G.1/G.3)
 │   ├── dom/          GenericDomAdapter, SelectorProfile
 │   └── selection/    UserSelectionAdapter
 │
@@ -1570,6 +1772,7 @@ src/main/resources/
 backend/leadlens/
 ├── .env.demo                     # DemoCrmAdapter config/secrets     (G.7)
 ├── .env.leadrat                  # LeadratAdapter config/secrets     (G.7, Phase 10 item 6)
+├── .env.leadscrm                 # LeadsCrmAdapter config/secrets    (G.7, built 2026-09-18)
 └── .env.<crmKey>                 # one per adapter added later       (G.7)
 ```
 
@@ -1692,10 +1895,38 @@ renders mostly §9 — and that is a *correct* briefing.
 
 ---
 
-## Phase 3 — Fact extraction (LLM pass 1)  ← NEXT
+## Phase 3 — Fact extraction (LLM pass 1)  ✅ DONE
 
 **Goal.** Every evidence item becomes zero or more `AtomicFact`s, cached forever, with
 citations inherited rather than generated.
+
+> **`[DONE 2026-09-17]`** `LlmClient` + `LlmProperties` (`ai/`), `ExtractorPrompt`,
+> `ExtractedFact`/`ExtractionResponse`/`SchemaValidator`, `FactExtractor` (`facts/`). Two
+> deviations worth knowing about:
+> - **No separate `EXTRACTOR_SCHEMA.json` file.** The schema is inline in `ExtractorPrompt.SYSTEM`
+>   as a JSON example plus prose rules, and `response_format: json_object` is requested via
+>   OpenRouter. `SchemaValidator` still enforces the shape server-side regardless of what the
+>   model actually returns, so nothing depends on the model honouring the schema description.
+> - **The model outputs `rawValue`, not `normalizedValue`.** `AttributeNormalizer` (already
+>   built in Phase 1/2) runs in code on whatever the model reports as stated
+>   (`SchemaValidator.toFact`), rather than asking the model to normalise. This is `F.2` taken
+>   one step further than the plan originally specified: normalisation is something the system
+>   can already do deterministically, so it never became the model's job at all.
+> - **`EvidenceItem` gained a field**: `factsExtractedVersion`. Needed because the extraction
+>   cache (`findByEvidenceIdAndExtractorVersion`) can't otherwise distinguish "never extracted"
+>   from "extracted, and genuinely produced zero facts" — a quiet call would otherwise be
+>   re-sent to the model on every single generation, breaking the "adding one activity costs
+>   exactly one call" guarantee. See the field's own Javadoc.
+> - `TASK` → deterministic `COMMITMENT_AGENT`/`COMMITMENT_CUSTOMER`; `PROPERTY_SHARED` →
+>   deterministic `PROPERTY_RESPONSE` ("awaiting feedback"); `STATUS_CHANGE`/`FIELD_UPDATE` →
+>   no fact at all (already fully covered by the live field snapshot + journey timeline).
+>   `CALL`/`MESSAGE`/`NOTE`/`MEETING`/`SITE_VISIT`/`DOCUMENT` go through the model.
+> - Contradiction handling (step 8) is in `FactExtractor.supersedeEarlierFacts`: any older OPEN
+>   fact sharing an attributeKey is marked `SUPERSEDED`, retained, never deleted.
+> - Tests: `SchemaValidatorTest` (drops-on-malformed, confidence clamping, attributeKey/kind
+>   cross-check, ordinal assignment). No extractor-prompt test against a live model — that needs
+>   a real `OPENROUTER_API_KEY` and is worth doing by hand against the Rahul Sharma fixture
+>   before the demo, not as an automated test.
 
 **Steps**
 
@@ -1733,9 +1964,31 @@ generation makes **zero** extraction calls. Adding one activity makes **exactly 
 
 ---
 
-## Phase 4 — Selection, composition and the grounding gate
+## Phase 4 — Selection, composition and the grounding gate  ✅ DONE
 
 **Goal.** §3–§8 render, and the system becomes structurally incapable of inventing a claim.
+
+> **`[DONE 2026-09-17]`** `FactSelector` and `GroundingPolicy` (`briefing/`), exactly as
+> specified, plus `GroundingPolicyTest`/`FactSelectorTest` covering every inclusion floor and
+> all five verdict rungs.
+>
+> **One considered deviation: there is no `Composer` LLM call for §3–§7.** `InferentialProjector`
+> renders those five sections directly from `FactSelector`'s output. Reasoning: the inclusion
+> floors are already exhaustive by construction — every OPEN objection, the latest value per
+> attribute, one response per property — so a composer call would have nothing left to decide.
+> Asking a model to choose among an already-fully-determined set is asking it to decide
+> something the system already knows (F.2), and it's one more surface where a model could be
+> talked into dropping the fact that mattered (D.4). **The one real composer call left is §8
+> Talking Points** (`TalkingPointsComposer` + `TalkingPointsPrompt`), which the plan already
+> named as the one section that is genuinely model-authored prose (F.3's stated exception) — it
+> sees only already-selected `AtomicFact` claims, never raw evidence text (F.6), and renders
+> under `Provenance.INFERRED` with an AI SUGGESTION treatment.
+>
+> If this trade-off turns out to be wrong in practice — e.g. too many facts for §4/§6/§7 to
+> read well unranked — the fix is adding a real `Composer` pass back in for those sections
+> specifically; `FactSelector`'s output is already the exact input such a pass would need.
+>
+> `provenance` rendering (step 10) already existed from Phase 2; nothing new needed there.
 
 **Steps**
 
@@ -1782,9 +2035,27 @@ generation makes **zero** extraction calls. Adding one activity makes **exactly 
 
 ---
 
-## Phase 5 — Run API
+## Phase 5 — Run API  ✅ DONE
 
 **Goal.** Generation is a run, not a request (F.8), and existence is not generation (F.9).
+
+> **`[DONE 2026-09-17]`** `BriefingRun`/`RunStatus`/`RunStep`/`RunRepository`/`RunRegistry`
+> (`run/`), `BriefingRunService` (the `@Async` orchestrator - has to be a separate bean from
+> `BriefingService`, since `@Async` only applies through the Spring proxy), `RunController`.
+> `POST /api/briefings` now does the fingerprint-cache-or-202 flow exactly as specified.
+>
+> Two honest gaps against the step list, not oversights:
+> - **Deterministic sections are not persisted-and-returned first.** `generateFull` computes and
+>   saves the whole document (deterministic + inferential) in one pass at the end of the async
+>   job, rather than writing §1/§2/§9/§10 immediately and letting the panel show them within
+>   ~200ms while extraction continues. The mechanism this needs (splitting `generateFull` so
+>   the deterministic write commits before the extraction loop starts) is straightforward to
+>   add later; it just wasn't built this round.
+> - **`GET /api/briefings/run/{runId}`'s response is `{runId, status, briefingId, completedItems,
+>   totalItems, steps[], errorMessage}`**, not the `{sections{}, elapsedMs}` shape sketched in
+>   H.1/step 3 - `elapsedMs` is derivable client-side from `steps[]`'s timestamps, and the
+>   finished sections are one `GET /api/briefings/{id}` away once `status` is `COMPLETE`, so
+>   nothing is actually missing, just shaped slightly differently than first sketched.
 
 **Steps**
 
@@ -1806,9 +2077,29 @@ resumes from cached extractions with no bespoke recovery code.
 
 ---
 
-## Phase 6 — The extension
+## Phase 6 — The extension  🟢 WORKING END-TO-END (panel design still basic)
 
 **Goal.** The agent never leaves the CRM.
+
+> **`[UPDATED 2026-09-18]`** Step 2 (CRM detection + identity) is real for four adapters now —
+> `leadrat`, `leadrat-builder`, `leadscrm`, and the new `demo` (`frontend/leadlens/src/content/crm/`)
+> — and `leadscrm`/`demo`'s lead-click identity comes from a `data-lead-id` DOM attribute rather
+> than the URL, since neither CRM exposes a per-lead route (confirmed by code inspection for
+> `leadscrm`; `demo` is a static test page built for exactly this).
+>
+> **`[UPDATED 2026-09-18, verified live]` The panel is real, not mock.** `App.tsx`'s
+> `SHOW_MOCK_DATA` is now `false`; a lead click drives a genuine `background/backendClient.ts`
+> round trip (`POST /api/briefings` → poll the run → `GET` the finished document), and
+> `lib/mapBriefing.ts` projects the real ten-section response onto the panel's existing
+> components. Verified end-to-end against the `demo` adapter: click Rahul Sharma in
+> `mock-crm/index.html`, watch the side panel render a real generated briefing with correct
+> citations. What's left in this phase is narrower than before: the panel still renders through
+> the *original, simpler* component set (§I.2's richer design — per-section provenance badges,
+> a dedicated source drawer, §0/journey as their own views, the DOM-extraction fallback) was
+> never built; `mapBriefing.ts` is a deliberate bridge to make the existing UI real, not that
+> redesign. `GET /api/briefings/upcoming` (step 3) and its panel surface (step 4,
+> `UpcomingMeetingBanner.tsx`) are also done, ahead of where this phase originally sequenced
+> them (they were Phase 9 items, pulled forward since the plumbing was already in place).
 
 **Steps**
 
@@ -1834,9 +2125,35 @@ in, click a source chip, land on the referenced activity.
 
 ---
 
-## Phase 7 — Freshness, refresh and What Changed
+## Phase 7 — Freshness, refresh and What Changed  ✅ DONE (backend)
 
 **Goal.** The demo's strongest beat, and the proof that the system is incremental.
+
+> **`[DONE 2026-09-17]`** `GET /api/briefings/latest`, `POST /api/briefings/{id}/refresh`,
+> `BriefingDiffService` + `GET /api/briefings/{id}/changes?since=`. Frontend half (steps 2, 5)
+> is the other developer's work.
+>
+> - `/latest`'s response is `{briefingId, stale, lastUpdatedAt, fieldContradictions[]}` rather
+>   than `{stale, newActivityCount, lastUpdatedAt}` - `newActivityCount` was dropped in favour
+>   of `fieldContradictions[]`, the F.16 live sync-check result. Both are cheap boolean/list
+>   signals computed the same way (compare current evidence against what's stored), so adding
+>   `newActivityCount` back is a small addition if the panel design wants the exact count too.
+> - **No `EvidenceInvalidationService` / step 6.** There is no event bus between the Demo CRM
+>   and LeadLens - `POST /api/democrm/leads/{id}/activities` just writes a row, it does not
+>   publish anything. Instead, **`GET /api/briefings/latest` and `POST /api/briefings` both
+>   eagerly sync evidence and run extraction on any new item before answering**
+>   (`BriefingService.ensureExtractedContext`). This gets the same *user-facing* result the
+>   plan wanted from G.5 (a field/fact contradiction or a new fact is visible the moment the
+>   lead is opened, not gated behind a click) without building event infrastructure - extraction
+>   is already cached per item, so calling this on every page load costs nothing once a lead's
+>   evidence has been read. A real webhook receiver for a non-Demo CRM would still need G.5's
+>   event listener; the Demo CRM's own activity-creation event was the only thing this replaces.
+> - What Changed diffs the two versions' **rendered entry text**, not a fact-id-level structural
+>   diff - simpler, and still fully deterministic (`BriefingSectionEntity.entries` is frozen at
+>   generation time, so comparing two versions' text is comparing two real documents, not
+>   recomputing anything). It does not yet render `old → new` for a single changed value as one
+>   line (F.14) - a value change currently shows as one removed line and one added line, which
+>   is correct but less polished than the plan's phrasing suggests.
 
 **Steps**
 
@@ -1860,9 +2177,74 @@ talking point.
 
 ---
 
-## Phase 8 — Permissions and tenancy
+## Phase 7.5 — Report export: PDF + email `[ADDED 2026-09-18]`
+
+**Goal.** A separate teammate walkthrough (Stage 4) treats "PDF report emailed to the agent
+taking the meeting" as a first-class output path, not a side feature — this section was
+previously Part O.2, brief-optional, deferred to Phase 10. **Team decision (2026-09-18):
+bumped up in priority.** Sequenced after Phase 7 because it renders the same report `/latest`
+now returns in full.
+
+**Steps**
+
+1. Add `spring-boot-starter-mail` (SMTP) and a PDF library — **Apache PDFBox** (Apache 2.0,
+   no licensing question for the public repo) rather than an iText-family library. Render
+   `BriefingSectionEntity.entries` per section into a simple, legible layout: this does not
+   need to be beautiful, it needs to be the same trustworthy content the panel shows, in a
+   form an agent can glance at on their phone before walking into a meeting.
+2. `GET /api/leads/{leadId}/report.pdf` — generates on demand from the current latest
+   `Briefing` (or a specific `{briefingId}` if the panel wants a past version). Not cached as a
+   stored artifact initially — regenerating from already-persisted section entries is cheap and
+   avoids a second copy of the report going stale independently of the source rows.
+3. `POST /api/leads/{leadId}/report/email` — sends the PDF as an attachment. **Open question,
+   not yet resolved:** LeadLens has no verified agent-email directory. The Demo CRM's
+   `DemoUser` has no email field today (`DemoDataSeeder` only carries id/tenant/displayName/
+   role) - either add one there for the demo, or require the caller to pass `{to}` explicitly
+   and treat email-address resolution as the CRM's problem, not LeadLens's. The endpoint above
+   assumes the latter for now; revisit if the demo wants "just works" delivery without the
+   extension having to know the agent's address.
+4. **Never invent report content for the PDF path.** The PDF renders the exact same
+   `BriefingSectionEntity` rows the JSON API does - it is a second *presentation* of the same
+   trusted data, never a second generation path with its own chance to hallucinate.
+
+**Exit criteria.** `GET /api/leads/{leadId}/report.pdf` on the Rahul Sharma fixture produces a
+readable document with all ten sections, provenance visible per line, and a working email send
+to a test address.
+
+**Closes:** the walkthrough's Stage 4 requirement; no MVP checklist item names this directly.
+
+---
+
+## Phase 8 — Permissions and tenancy  ✅ DONE (see gaps below)
 
 **Goal.** C4 enforced and demonstrable.
+
+> **`[DONE 2026-09-17]`** `TokenAuthFilter` + `SecurityProperties` (`security/`), replacing the
+> old fully-open `SecurityConfig`. **This is a real gap against the plan, stated plainly:**
+> - There is **no per-user `ActingUser` resolution from a validated token** (step 1). What
+>   exists is a single shared secret (`LEADLENS_API_TOKEN`) gating `/api/briefings/**` and
+>   `/api/crm/**` - it answers "is this caller allowed to claim an identity at all," not "which
+>   real person is this." `X-LeadLens-Tenant`/`X-LeadLens-User` are still trusted directly once
+>   the shared token checks out, with nothing cryptographically binding a specific user to those
+>   header values the way a JWT claim would. This is a considered, time-boxed simplification for
+>   an extension talking to a backend it also controls - not something to present as finished
+>   per-user auth. See `SecurityConfig`'s Javadoc.
+> - **No separate `PermissionService`** (step 2). Field-level masking (step 3, 5) is real and
+>   already enforced - but it lives inside `DemoCrmController`/`DemoFieldVisibility` (the Demo
+>   CRM's own role→field-visibility map), exactly as the plan's own F.7 note anticipated: "the
+>   Demo CRM's own API already enforces its tenant and role rules independently." A real second
+>   adapter (Leadrat) would need its own equivalent, and *that* is where a shared
+>   `PermissionService` would earn its place - there is only one adapter with real data today,
+>   so extracting a shared abstraction had no second caller yet.
+> - Repository-layer tenant filtering (step 4) was already true from Phase 1 - every finder
+>   takes `tenantId`, no unscoped finder exists.
+> - **No automated cross-tenant-403 or masked-never-in-§8 test** (step 6). Both properties hold
+>   by construction (`BriefingRepository.findByTenantIdAndId` can't return another tenant's row;
+>   `TalkingPointsComposer` only ever sees already-extracted `AtomicFact` claims, and a masked
+>   field's value never reaches `EvidenceItem`/`LeadSnapshot` in the first place because the
+>   Demo CRM strips it server-side) but neither is pinned down by a test with Docker available
+>   in this environment. Worth adding as an integration test before the demo, following
+>   `DeterministicBriefingIT`'s pattern with `ARJUN` (masked budget) and a `TENANT_GLOBEX` lead.
 
 **Steps**
 
@@ -1884,9 +2266,34 @@ masked case is visible in the demo.
 
 ---
 
-## Phase 9 — Scheduled generation worker
+## Phase 9 — Scheduled generation worker  ✅ DONE (see gaps below)
 
 **Goal.** Checklist item 3, which the extension structurally cannot satisfy (I.5).
+
+> **`[DONE 2026-09-17]`** `UpcomingActivityWorker` (`schedule/`), `@Scheduled(fixedDelay=5m)`.
+> Idempotent via the same fingerprint mechanism `/refresh` uses - a fresh briefing is left alone,
+> so two ticks close together only generate once.
+>
+> **The real gap: multi-CRM lead enumeration and per-tenant service identity were never
+> resolved by the plan (Appendix 2), and still aren't.** `CrmAdapter` gained two new default
+> methods to make this concrete rather than hand-wavy:
+> - `listActiveLeads(ActingUser)` - "every lead this user can see." Defaults to empty; an
+>   adapter opts in once it has a bulk-listing API to call.
+> - `serviceIdentities()` - "which users the worker should act as for this CRM." Defaults to
+>   empty. **`DemoCrmAdapter` hardcodes the two seeded tenants' users** (`t-acme`/`u-priya`,
+>   `t-globex`/`u-meera`) - this is Demo-CRM-specific glue, deliberately kept out of the
+>   generic worker, but it is still a hardcoded list, not a real service-account registry. A
+>   second adapter (Leadrat) would need to answer this properly, and there's no design for that
+>   yet beyond "the worker asks the adapter."
+> - **Tenant-timezone resolution (F.11) is not applied** - the T-30 window compares against
+>   `BriefingClock.now()` in UTC, not each activity against its tenant's own zone. The seeded
+>   fixture data is IST-authored but stored as absolute `Instant`s, so the window itself is
+>   still correct in absolute time; what's missing is *displaying* "in 28 minutes" relative to
+>   the tenant's clock, which is a frontend/rendering concern more than a scheduling one.
+> - ~~No `GET /api/briefings/upcoming` (step 3) and no panel surface for it (step 4)~~
+>   **`[DONE 2026-09-18]`** Both built: `BriefingController.upcoming()` and the extension's
+>   `UpcomingMeetingBanner.tsx`, scoped per-lead (the panel already knows which lead it's
+>   looking at) rather than as a tenant-wide dashboard.
 
 **Steps**
 
@@ -1915,7 +2322,7 @@ Only after 0–9 are green. Ranked by demo value per hour.
 | 3 | `POST /api/briefings/{id}/ask` with lane gating by omission (I.6) | `[RESOLVED]` ledger #6 — secondary, never the headline |
 | 4 | `briefing_feedback` capture (👍/👎 per fact) | A.5 optional scope, cheap |
 | 5 | ArchUnit test enforcing the engine↔adapter boundary (Part J) | Makes the CRM-agnostic claim provable |
-| 6 | `LeadratAdapter` beyond a stub | Q1, Q3, Q4 now answered (2026-09-17) — build as a multi-call adapter (G.2 note) enforcing RBAC-derived field masking. Q2 (deep-link stability) and Q5 (tenant identification) still open — confirm before wiring §10 links and `ActingUser.tenantId` resolution for Leadrat specifically |
+| 6 | `LeadratAdapter` beyond a stub | Q1, Q3, Q4 now answered (2026-09-17) — build as a multi-call adapter (G.2 note) enforcing RBAC-derived field masking. Q2 (deep-link stability) and Q5 (tenant identification) still open — confirm before wiring §10 links and `ActingUser.tenantId` resolution for Leadrat specifically. `[UPDATED 2026-09-18]` Deprioritized for the hackathon: `LeadsCrmAdapter` (G.1/G.3) already demonstrates "one adapter class = one new CRM, engine unchanged" without needing Leadrat access, so this item's judging value is now redundant, not just schedule-risky |
 | 7 | Reminder notification | A.5. The payload is a **subset of the same `BriefingDocument`**, never a separate generation path |
 
 ---
@@ -2131,7 +2538,7 @@ recorded so the deferral reads as a decision rather than an oversight.
 | Calendar integration | A.5 optional | Phase 9's worker delivers the actual value (auto-generation before a meeting) without an OAuth integration |
 | Voice playback | A.5 optional | No MVP checklist item depends on it |
 | Multilingual briefing generation | A.5 optional | The extractor must already handle code-mixed input (R6); generating *output* in another language is a separate, later concern |
-| Email / notification delivery | A.5 optional | Phase 10 item 7, and only as a subset of the same `BriefingDocument` |
+| ~~Email / notification delivery~~ | A.5 optional | `[MOVED 2026-09-18]` **No longer deferred.** A separate teammate walkthrough treats PDF-over-email as a first-class output path — see the new Phase 7.5 |
 | Post-meeting comparison | A.5 optional | The retained-versions mechanism (D.5) already makes it possible later; building the UI is not MVP |
 | Manager-visible briefing quality feedback | A.5 optional | `briefing_feedback` captures the data in Phase 10; the manager view is not MVP |
 
@@ -2142,6 +2549,22 @@ Mobile app · autonomous WhatsApp or calling · multi-agent architecture · mode
 unnecessary at this scale, and adding one would reintroduce exactly the select-before-extract
 failure D.4 exists to prevent) · supporting fifteen CRMs (one adapter properly, plus a
 generic fallback — Part G).
+
+## O.4 Product-module scope, confirmed independently `[ADDED 2026-09-18]`
+
+A separate teammate walkthrough of the same problem confirmed, without reference to this
+document, several boundaries this plan already assumed via its fixtures but never stated as
+an explicit rule:
+
+- **Pre-sales lead module only.** No resale, no post-sales workflows. The Rahul Sharma fixture
+  was always a pre-sales real-estate lead; this makes the boundary a stated decision rather
+  than an implicit one.
+- **No real WhatsApp integration.** Conversations are simulated `MESSAGE` evidence
+  (`channel = WHATSAPP`) in the Demo CRM, matching what was already built (Phase 1) and what
+  the brief explicitly permits (A.4).
+- **No call recordings or transcription initially.** Already O.1 territory
+  ("production-level call transcription"); the null-text call case (E.5) is exactly this,
+  handled as a Missing Information gap rather than attempted transcription.
 
 ---
 
@@ -2271,6 +2694,44 @@ are genuinely blocking-if-you-need-them, not defaults — read the note on each.
     build it** (R13, Phase 10 item 2) — confirmed in scope. Owner not named to a specific
     person on this 3-person team; default to whoever clears their lane's phases first (see
     `TODO_Leadlens_3Person.md` Overflow sections), 10–15 hand-labelled leads.
+
+## Report delivery `[ADDED 2026-09-18]`
+
+14. `[OPEN]` **Where does an agent's email address come from?** Phase 7.5's
+    `POST /api/leads/{leadId}/report/email` needs one, and neither `ActingUser` nor the Demo
+    CRM's `DemoUser` carries one today. Recommend: add an `email` field to `DemoUser` for the
+    demo (cheap, no design risk) and decide separately whether a real CRM adapter resolves this
+    itself or LeadLens needs its own directory - not worth resolving generically before a
+    second adapter exists to test the generic answer against.
+15. `[OPEN]` **Should lead registration (`POST /api/leads`, E.8) be a hard precondition for
+    generation, or stay auto-upsert as currently designed?** Auto-upsert was the pragmatic
+    default chosen while implementing this section; flip it to a strict `leads.require(...)`
+    if the demo wants to show registration as its own visible step rather than an invisible
+    side effect of the first `Prepare Me` click.
+
+## `leadscrm` adapter, CI and submission hygiene `[ADDED 2026-09-18]`
+
+16. `[OPEN]` **Push `leads-crm-backend`'s JitPack `pom.xml` fix directly to `main`, or via a
+    branch/PR first?** `main` auto-deploys live to EC2 on push (`deploy-main.yml`) — asked of
+    the team, not yet answered.
+17. `[OPEN]` **Rotate the OpenRouter / Google OAuth / Recall.ai credentials pasted into chat
+    this session?** Same risk class as Q8a (single-point-of-failure key custody), except these
+    were typed into a chat transcript rather than only held in an env file. Not yet actioned.
+18. `[OPEN]` **Does hardcoding real `leadrat.com` / `leadratd.com` domains in the public
+    `leadrat-hackathon` repo, or `leads-crm-backend`/`leads-crm-frontend` being adapted from
+    real Leadrat production code, create a hackathon submission-rules problem?** Raised earlier
+    this session, never resolved either way. Worth a decision before submission — likely a
+    README/disclosure question rather than a code change.
+19. `[OPEN — PRIORITY]` **`[ADDED 2026-09-18]` `LeadsCrmAdapter`'s Cognito service auth is
+    blocked: `CognitoServiceAuthClient` uses `USER_PASSWORD_AUTH`, but the actual app client
+    (`scripts/provision-cognito.sh`) only allows SRP** — confirmed via a real `InitiateAuth`
+    call returning `USER_PASSWORD_AUTH flow not enabled for this client`. Deliberately deferred
+    (2026-09-18 decision, see the Build Log's priority-TODO section): the `demo` CRM path
+    already proves the brief's actual requirements live, so this blocks only `leadscrm`'s
+    live-clickable path, not the core demo. Two unchosen fixes on record: enable
+    `ALLOW_USER_PASSWORD_AUTH` on the app client (needs AWS Console access this session did not
+    have), or implement SRP for real (no AWS SDK in play by design — a real crypto lift, not a
+    config change).
 
 ---
 

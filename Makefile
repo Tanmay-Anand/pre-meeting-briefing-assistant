@@ -16,10 +16,13 @@
 #                           LEADLENS_DB_USER=postgres LEADLENS_DB_PASSWORD=secret
 
 BACKEND_DIR   := backend/leadlens
-FRONTEND_DIR  := frontend
+# [FIXED 2026-09-18] Was `frontend` - the extension actually lives at frontend/leadlens
+# (PR#2's restructuring never updated this). frontend/demo-crm (Part G.4) was never built at
+# all, so the demo-crm targets below are removed rather than pointed at something that doesn't
+# exist - see IMPLEMENTATION_PLAN.md's 2026-09-18 Build Log entry.
+FRONTEND_DIR  := frontend/leadlens
 
 BACKEND_PORT  := 8080
-DEMO_CRM_PORT := 5174
 
 GIT_BASH := C:/Program Files/Git/bin/bash.exe
 
@@ -96,28 +99,22 @@ run-backend: check-java
 
 # ── Frontend ──────────────────────────────────────────────────────────────────
 
-.PHONY: install build-extension build-demo-crm build-frontend dev-extension dev-demo-crm type-check
+.PHONY: install build-extension build-frontend dev-extension type-check
 
 install:
 	cd $(FRONTEND_DIR) && npm install
 
-# Emits frontend/dist - load that directory via chrome://extensions > Load unpacked.
+# Emits frontend/leadlens/build - load that directory via chrome://extensions > Load unpacked.
 build-extension:
 	cd $(FRONTEND_DIR) && npm run build
 
-build-demo-crm:
-	cd $(FRONTEND_DIR) && npm run demo-crm:build
-
-build-frontend: build-extension build-demo-crm
+build-frontend: build-extension
 
 dev-extension:
 	cd $(FRONTEND_DIR) && npm run dev
 
-dev-demo-crm:
-	cd $(FRONTEND_DIR) && npm run demo-crm:dev
-
 type-check:
-	cd $(FRONTEND_DIR) && npm run type-check
+	cd $(FRONTEND_DIR) && npm run build
 
 # ── Everything ────────────────────────────────────────────────────────────────
 
@@ -182,4 +179,4 @@ head-backend:
 
 clean: stop-backend
 	cd $(BACKEND_DIR) && $(MVNW) clean
-	"$(GIT_BASH)" -c 'rm -rf $(FRONTEND_DIR)/dist $(FRONTEND_DIR)/demo-crm/dist logs/*.log logs/*.pid'
+	"$(GIT_BASH)" -c 'rm -rf $(FRONTEND_DIR)/build logs/*.log logs/*.pid'
